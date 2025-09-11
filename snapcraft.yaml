@@ -21,8 +21,6 @@ parts:
       - pyyaml
       - click
       - kubernetes
-      - helm-python
-      - psycopg2-binary
       - rich  # For beautiful CLI output
     stage-packages:
       - git  # For git operations if needed
@@ -47,15 +45,8 @@ parts:
     stage:
       - bin/helm
 
-  # Part 4: Platform module Helm charts
-  platform-charts:
-    plugin: dump
-    source: ../spandaai-platform-deployment/bare-metal/modules
-    source-type: local
-    organize:
-      "*": charts/
-    stage:
-      - charts/
+  # REMOVED: platform-charts part completely removed
+  # Module templates are now served by the backend API for security and IP protection
 
 apps:
   # Main CLI command
@@ -65,7 +56,6 @@ apps:
       - home          # Access to ~/.spanda/config and ~/.kube/config
       - network       # API calls to backend and Kubernetes clusters
       - network-bind  # If running local backend server
-      - removable-media # Access to external storage if needed
 
   # Alias for shorter command
   sk8s:
@@ -74,7 +64,6 @@ apps:
       - home
       - network
       - network-bind
-      - removable-media
 
 # Define the permissions your CLI needs
 plugs:
@@ -82,9 +71,5 @@ plugs:
     read: all
   network:
   network-bind:
-  removable-media:
 
-# Layout for organizing files in the snap
-layout:
-  /opt/spandak8s/charts:
-    bind: $SNAP/charts
+# REMOVED: layout section no longer needed as no local charts are included

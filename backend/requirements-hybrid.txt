@@ -1,0 +1,10 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+kubernetes==28.1.0
+pyyaml==6.0.1
+pyjwt==2.8.0
+
+# Development
+pytest==7.4.3
+httpx==0.25.2

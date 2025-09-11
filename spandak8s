@@ -61,7 +61,14 @@ def cli(ctx, config, debug, version):
     # Load configuration
     try:
         ctx.obj['config'] = SpandaConfig(config)
-        ctx.obj['api_client'] = SpandaAPIClient(ctx.obj['config'])
+        
+        # Initialize API client
+        api_client = SpandaAPIClient(ctx.obj['config'])
+        ctx.obj['api_client'] = api_client
+        
+        # Module definitions are now fetched from the API client directly
+        # No separate ModuleDefinitions class needed
+        
     except Exception as e:
         console.print(f"❌ [red]Error loading configuration: {e}[/red]")
         if debug:
@@ -73,6 +80,61 @@ def cli(ctx, config, debug, version):
 cli.add_command(modules_group, name='modules')
 cli.add_command(tenants_group, name='tenants') 
 cli.add_command(status_group, name='status')
+
+# Authentication commands
+@cli.command()
+@click.option('--username', '-u', prompt=True, help='Username')
+@click.option('--password', '-p', prompt=True, hide_input=True, help='Password')
+@click.pass_context
+def login(ctx, username, password):
+    """Login to the Spanda Platform backend"""
+    config = ctx.obj['config']
+    api_client = ctx.obj['api_client']
+    
+    try:
+        # Attempt login
+        response = api_client.login(username, password)
+        
+        if response and 'access_token' in response:
+            # Store token in config
+            config.set_auth_token(response['access_token'], username)
+            console.print(f"✅ [green]Successfully logged in as {username}[/green]")
+            console.print(f"🔑 Token expires in {response.get('expires_in', 'unknown')} seconds")
+        else:
+            console.print("❌ [red]Login failed: Invalid response from server[/red]")
+            
+    except Exception as e:
+        console.print(f"❌ [red]Login failed: {e}[/red]")
+        if ctx.obj.get('debug'):
+            import traceback
+            console.print(traceback.format_exc())
+
+@cli.command()
+@click.pass_context
+def logout(ctx):
+    """Logout from the Spanda Platform backend"""
+    config = ctx.obj['config']
+    username = config.auth_username
+    
+    config.clear_auth()
+    if username:
+        console.print(f"✅ [green]Successfully logged out {username}[/green]")
+    else:
+        console.print("✅ [green]Logged out[/green]")
+
+@cli.command()
+@click.pass_context  
+def whoami(ctx):
+    """Show current authentication status"""
+    config = ctx.obj['config']
+    
+    if config.is_authenticated():
+        username = config.auth_username
+        console.print(f"🔑 [green]Logged in as: {username or 'unknown'}[/green]")
+        console.print(f"🌐 [dim]Backend: {config.api_base_url}[/dim]")
+    else:
+        console.print("❌ [yellow]Not logged in[/yellow]")
+        console.print("💡 [dim]Use 'spandak8s login' to authenticate[/dim]")
 
 # Quick command aliases
 @cli.command()

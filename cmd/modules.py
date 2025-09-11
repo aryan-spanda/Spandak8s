@@ -8,7 +8,41 @@ This module provides comprehensive module management capabilities including:
 - Displaying module categories and resource tiers
 
 Commands:
-- modules list: Show all available platform modules
+- modules lis        table.a        table.add_column("Storage", style="green")
+          for category_key, category_modules in categories.items():
+            console.print(f"📂 [cyan]{category_key}:[/cyan]")
+            
+            # Get modules in this category
+            for module_name in category_modules:
+                module_data = module_definitions.get_module(module_name)
+                if module_data:
+                    desc = module_data.get('description', 'No description available')
+                    version = module_data.get('version', 'latest')
+                    console.print(f"   • [green]{module_name}[/green] (v{version}): {desc}")
+            console.print()  # Empty line between categories.add_column("PVCs", style="yellow")
+        
+        for tier_key, tier_data in resource_tiers.items():
+            table.add_row(
+                tier_key,
+                tier_key.title(),
+                tier_data.get("cpu", "N/A"),
+                tier_data.get("memory", "N/A"), 
+                tier_data.get("storage", "N/A"),
+                "Unlimited"  # Default PVC limit
+            )U", style="green")
+        table.add_column("Memory", style="green")
+        table.add_column("Storage", style="green")
+        table.add_column("PVCs", style="yellow")
+        
+        for tier_key, tier_data in resource_tiers.items():
+            table.add_row(
+                tier_key.title(),
+                tier_key.title(),
+                tier_data.get("cpu", "N/A"),
+                tier_data.get("memory", "N/A"),
+                tier_data.get("storage", "N/A"),
+                "Unlimited"  # Default PVC limit
+            )ilable platform modules
 - modules generate-config: Create tenant configuration with selected modules
 - modules list-tiers: Display available resource tiers (Bronze/Standard/Premium)
 - modules list-categories: Show module categories
@@ -21,10 +55,17 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from pkg.module_detector import validate_module_health
-from pkg.module_definitions import module_definitions
+# NOTE: module_definitions is now passed via context from main CLI (no global import)
 
 console = Console()
+
+def _get_module_definitions(ctx):
+    """Helper function to get module_definitions from context with error handling"""
+    module_definitions = ctx.obj.get('module_definitions')
+    if not module_definitions:
+        console.print("[red]Error: Module definitions not available. Check API connection.[/red]")
+        return None
+    return module_definitions
 
 @click.group()
 def modules_group():
@@ -43,13 +84,13 @@ def list_modules(ctx):
         ) as progress:
             progress.add_task("Fetching available modules...", total=None)
             
-            # Try API first, fallback to local definitions
-            try:
-                api_client = ctx.obj['api_client']
-                modules = api_client.list_available_modules()
-            except Exception:
-                console.print("[dim]API unavailable, using local module definitions...[/dim]")
-                modules = module_definitions.list_available_modules()
+            # Get module_definitions from context (API-driven)
+            module_definitions = ctx.obj.get('module_definitions')
+            if not module_definitions:
+                console.print("[red]Error: Module definitions not available. Check API connection.[/red]")
+                return
+                
+            modules = module_definitions.list_modules_by_category()
         
         if not modules:
             console.print("📭 [yellow]No modules available[/yellow]")
@@ -295,13 +336,18 @@ def generate_tenant_config(ctx, namespace, modules, tier, storage_class, output,
     """Generate tenant configuration with resource quotas and enabled modules"""
     
     try:
+        # Get module definitions from context
+        module_definitions = _get_module_definitions(ctx)
+        if not module_definitions:
+            return
+            
         # Validate module dependencies if requested
         if validate_deps and modules:
-            is_valid, missing_deps = module_definitions.validate_dependencies(list(modules))
-            if not is_valid:
+            validation_result = module_definitions.validate_modules(list(modules))
+            if not validation_result.get('valid', True):
                 console.print("⚠️ [yellow]Dependency validation failed:[/yellow]")
-                for dep in missing_deps:
-                    console.print(f"   • {dep}")
+                for error in validation_result.get('errors', []):
+                    console.print(f"   • {error}")
                 if not click.confirm("Continue anyway?"):
                     console.print("❌ [yellow]Operation cancelled[/yellow]")
                     return
@@ -317,16 +363,11 @@ def generate_tenant_config(ctx, namespace, modules, tier, storage_class, output,
             console.print("📦 [dim]No modules specified - all modules will be disabled[/dim]")
         
         # Generate the configuration
-        config = module_definitions.generate_tenant_values(
-            namespace=namespace,
+        yaml_output = module_definitions.generate_tenant_values(
+            tenant_name=namespace,
             modules=list(modules),
-            resource_tier=tier.lower(),
-            storage_class=storage_class
+            tier=tier.lower()
         )
-        
-        # Convert to YAML
-        import yaml
-        yaml_output = yaml.dump(config, default_flow_style=False, sort_keys=False)
         
         # Output to file or stdout
         if output:
@@ -351,12 +392,18 @@ def generate_tenant_config(ctx, namespace, modules, tier, storage_class, output,
         console.print(f"❌ [red]Error generating configuration: {e}[/red]")
 
 @modules_group.command('list-tiers')
-def list_resource_tiers():
+@click.pass_context
+def list_resource_tiers(ctx):
     """List available resource quota tiers"""
     try:
-        resource_templates = module_definitions.get_resource_templates()
+        # Get module definitions from context
+        module_definitions = _get_module_definitions(ctx)
+        if not module_definitions:
+            return
+            
+        resource_tiers = module_definitions.get_resource_tiers()
         
-        if not resource_templates:
+        if not resource_tiers:
             console.print("📭 [yellow]No resource tiers available[/yellow]")
             return
         
@@ -368,32 +415,38 @@ def list_resource_tiers():
         table.add_column("Storage", style="green")
         table.add_column("PVCs", style="yellow")
         
-        for tier_key, tier_data in resource_templates.items():
-            quota = tier_data.get("resource_quota", {})
+        for tier_key, tier_data in resource_tiers.items():
             table.add_row(
                 tier_key,
-                tier_data.get("name", tier_key.title()),
-                quota.get("requests.cpu", "N/A"),
-                quota.get("requests.memory", "N/A"), 
-                quota.get("requests.storage", "N/A"),
-                quota.get("persistentvolumeclaims", "N/A")
+                tier_key.title(),
+                tier_data.get("cpu", "N/A"),
+                tier_data.get("memory", "N/A"), 
+                tier_data.get("storage", "N/A"),
+                "Unlimited"  # Default PVC limit
             )
         
         console.print(table)
         
         # Show descriptions
         console.print("\n📋 [cyan]Tier Descriptions:[/cyan]")
-        for tier_key, tier_data in resource_templates.items():
-            desc = tier_data.get("description", "No description available")
-            console.print(f"   • [green]{tier_key}[/green]: {desc}")
+        for tier_key, tier_data in resource_tiers.items():
+            desc = f"Resource allocation for {tier_key} tier"
+            console.print(f"   • [green]{tier_key.title()}[/green]: {desc}")
+            console.print(f"     CPU: {tier_data.get('cpu', 'N/A')}, Memory: {tier_data.get('memory', 'N/A')}, Storage: {tier_data.get('storage', 'N/A')}")
         
     except Exception as e:
         console.print(f"❌ [red]Error listing resource tiers: {e}[/red]")
 
 @modules_group.command('list-categories')
-def list_module_categories():
+@click.pass_context
+def list_module_categories(ctx):
     """List available module categories"""
     try:
+        # Get module definitions from context
+        module_definitions = _get_module_definitions(ctx)
+        if not module_definitions:
+            return
+            
         categories = module_definitions.get_categories()
         
         if not categories:
