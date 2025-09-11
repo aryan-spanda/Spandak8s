@@ -1,0 +1,386 @@
+#
+# Spandak8s CLI - Platform Module Definitions Configuration
+#
+# This configuration file defines all available platform modules that can be enabled for tenants.
+# It includes module metadata, resource requirements, dependencies, and categorization.
+#
+# Key Features:
+# - 13 platform modules across 6 categories (Data Storage, Analytics, Security, etc.)
+# - 3 resource tiers: Bronze (10 CPU/20Gi), Standard (20 CPU/40Gi), Premium (50 CPU/100Gi) 
+# - Dependency management and conflict detection
+# - Module categorization for better organization
+# - Version tracking and compatibility matrices
+#
+# Usage: This file is loaded by pkg/module_definitions.py and used throughout the CLI
+# for tenant configuration generation, resource quota management, and module validation.
+#
+
+# Available Platform Modules Configuration
+# This file defines all available modules that can be enabled for tenants
+
+modules:
+  # Data Storage & Management
+  data-lake-baremetal:
+    name: "data-lake-baremetal"
+    display_name: "Data Lake Platform"
+    description: "Complete data lake platform with MinIO, Spark, Dremio, and streaming components"
+    version: "1.0.0"
+    category: "data-storage"
+    dependencies: []
+    chart_path: "data-lake-baremetal"
+    default_config:
+      tenant_scope: true
+      minio:
+        enabled: true
+        replicas: 1
+        persistence:
+          enabled: true
+          size: 5Gi
+          storageClass: standard
+        resources:
+          requests:
+            memory: 128Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 200m
+      spark:
+        enabled: true
+        master:
+          port: 7077
+          webPort: 8080
+          host: "0.0.0.0"
+          resources:
+            requests:
+              memory: 1024Mi
+              cpu: 500m
+            limits:
+              memory: 2Gi
+              cpu: 1000m
+        worker:
+          replicas: 2
+          resources:
+            requests:
+              memory: 1024Mi
+              cpu: 500m
+            limits:
+              memory: 2Gi
+              cpu: 1000m
+      dremio:
+        enabled: true
+        persistence:
+          enabled: true
+          size: 5Gi
+          storageClass: standard
+        resources:
+          requests:
+            memory: 2Gi
+            cpu: 500m
+          limits:
+            memory: 4Gi
+            cpu: 1000m
+      kafka:
+        enabled: false
+      nifi:
+        enabled: false
+      nessie:
+        enabled: false
+
+  data-management-complete:
+    name: "data-management-complete"
+    display_name: "Complete Data Management"
+    description: "Comprehensive data management suite with ETL, data catalog, and governance"
+    version: "1.0.0"
+    category: "data-management"
+    dependencies: ["data-lake-baremetal"]
+    chart_path: "data-management-complete"
+    default_config:
+      tenant_scope: true
+      airflow:
+        enabled: true
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 250m
+          limits:
+            memory: 1Gi
+            cpu: 500m
+      nifi:
+        enabled: true
+        resources:
+          requests:
+            memory: 1Gi
+            cpu: 500m
+          limits:
+            memory: 2Gi
+            cpu: 1000m
+
+  # Analytics & BI
+  traditional-bi-baremetal:
+    name: "traditional-bi-baremetal"
+    display_name: "Traditional BI Platform"
+    description: "Traditional business intelligence tools and dashboards"
+    version: "1.0.0"
+    category: "analytics"
+    dependencies: ["data-lake-baremetal"]
+    chart_path: "traditional-bi-baremetal"
+    default_config:
+      tenant_scope: true
+      superset:
+        enabled: true
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 250m
+          limits:
+            memory: 1Gi
+            cpu: 500m
+      metabase:
+        enabled: false
+
+  realtime-bi-baremetal:
+    name: "realtime-bi-baremetal"
+    display_name: "Real-time BI Platform"
+    description: "Real-time analytics and streaming data visualization"
+    version: "1.0.0"
+    category: "analytics"
+    dependencies: ["data-lake-baremetal"]
+    chart_path: "realtime-bi-baremetal"
+    default_config:
+      tenant_scope: true
+      clickhouse:
+        enabled: true
+        resources:
+          requests:
+            memory: 1Gi
+            cpu: 500m
+          limits:
+            memory: 2Gi
+            cpu: 1000m
+      grafana:
+        enabled: true
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 200m
+
+  # Monitoring & Observability
+  monitoring-prometheus:
+    name: "monitoring-prometheus"
+    display_name: "Prometheus Monitoring"
+    description: "Complete monitoring stack with Prometheus, Grafana, and AlertManager"
+    version: "1.0.0"
+    category: "monitoring"
+    dependencies: []
+    chart_path: "monitoring-prometheus"
+    default_config:
+      tenant_scope: false  # Cluster-wide monitoring
+      prometheus:
+        enabled: true
+        retention: "15d"
+        resources:
+          requests:
+            memory: 2Gi
+            cpu: 500m
+          limits:
+            memory: 4Gi
+            cpu: 1000m
+      grafana:
+        enabled: true
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 200m
+      alertmanager:
+        enabled: true
+        resources:
+          requests:
+            memory: 128Mi
+            cpu: 100m
+          limits:
+            memory: 256Mi
+            cpu: 200m
+
+  # Security
+  security-vault:
+    name: "security-vault"
+    display_name: "HashiCorp Vault"
+    description: "Secrets management and encryption services"
+    version: "1.0.0"
+    category: "security"
+    dependencies: []
+    chart_path: "security-vault"
+    default_config:
+      tenant_scope: false  # Cluster-wide security
+      vault:
+        enabled: true
+        ha:
+          enabled: true
+          replicas: 3
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 250m
+          limits:
+            memory: 512Mi
+            cpu: 500m
+
+  security-cert-manager:
+    name: "security-cert-manager"
+    display_name: "Certificate Manager"
+    description: "Automated TLS certificate management"
+    version: "1.0.0"
+    category: "security"
+    dependencies: []
+    chart_path: "security-cert-manager"
+    default_config:
+      tenant_scope: false  # Cluster-wide certificates
+      certManager:
+        enabled: true
+        resources:
+          requests:
+            memory: 32Mi
+            cpu: 10m
+          limits:
+            memory: 64Mi
+            cpu: 100m
+
+  # Networking
+  net-vpc-baremetal:
+    name: "net-vpc-baremetal"
+    display_name: "VPC Networking"
+    description: "Virtual private cloud networking for bare metal"
+    version: "1.0.0"
+    category: "networking"
+    dependencies: []
+    chart_path: "net-vpc-baremetal"
+    default_config:
+      tenant_scope: false  # Cluster-wide networking
+
+  net-lb-baremetal:
+    name: "net-lb-baremetal"
+    display_name: "Load Balancer"
+    description: "Layer 4 load balancing for bare metal deployments"
+    version: "1.0.0"
+    category: "networking"
+    dependencies: ["net-vpc-baremetal"]
+    chart_path: "net-lb-baremetal"
+    default_config:
+      tenant_scope: false
+
+  net-lb-app-external-baremetal:
+    name: "net-lb-app-external-baremetal"
+    display_name: "External App Load Balancer"
+    description: "Application layer load balancing for external traffic"
+    version: "1.0.0"
+    category: "networking"
+    dependencies: ["net-lb-baremetal"]
+    chart_path: "net-lb-app-external-baremetal"
+    default_config:
+      tenant_scope: false
+
+  net-lb-app-internal-baremetal:
+    name: "net-lb-app-internal-baremetal"
+    display_name: "Internal App Load Balancer"
+    description: "Application layer load balancing for internal traffic"
+    version: "1.0.0"
+    category: "networking"
+    dependencies: ["net-lb-baremetal"]
+    chart_path: "net-lb-app-internal-baremetal"
+    default_config:
+      tenant_scope: false
+
+  net-firewall-baremetal:
+    name: "net-firewall-baremetal"
+    display_name: "Firewall"
+    description: "Network security and firewall rules"
+    version: "1.0.0"
+    category: "networking"
+    dependencies: ["net-vpc-baremetal"]
+    chart_path: "net-firewall-baremetal"
+    default_config:
+      tenant_scope: false
+
+  net-address-baremetal:
+    name: "net-address-baremetal"
+    display_name: "Address Management"
+    description: "IP address allocation and management"
+    version: "1.0.0"
+    category: "networking"
+    dependencies: ["net-vpc-baremetal"]
+    chart_path: "net-address-baremetal"
+    default_config:
+      tenant_scope: false
+
+# Module Categories for filtering and organization
+categories:
+  data-storage:
+    name: "Data Storage"
+    description: "Data storage and lake management modules"
+    icon: "💾"
+  
+  data-management:
+    name: "Data Management" 
+    description: "ETL, data processing, and workflow management"
+    icon: "🔄"
+  
+  analytics:
+    name: "Analytics & BI"
+    description: "Business intelligence and analytics tools"
+    icon: "📊"
+  
+  monitoring:
+    name: "Monitoring"
+    description: "Observability, monitoring, and alerting"
+    icon: "📈"
+  
+  security:
+    name: "Security"
+    description: "Security, secrets management, and compliance"
+    icon: "🔒"
+  
+  networking:
+    name: "Networking"
+    description: "Network infrastructure and connectivity"
+    icon: "🌐"
+
+# Resource Templates for different tenant tiers
+resource_templates:
+  bronze:
+    name: "Bronze Tier"
+    description: "Basic resource allocation for development and testing"
+    resource_quota:
+      requests.cpu: "10"
+      requests.memory: "20Gi"
+      limits.cpu: "10"
+      limits.memory: "20Gi"
+      persistentvolumeclaims: "5"
+      requests.storage: "50Gi"
+    
+  standard:
+    name: "Standard Tier"
+    description: "Standard resource allocation for production workloads"
+    resource_quota:
+      requests.cpu: "20"
+      requests.memory: "40Gi"
+      limits.cpu: "20"
+      limits.memory: "40Gi"
+      persistentvolumeclaims: "10"
+      requests.storage: "100Gi"
+  
+  premium:
+    name: "Premium Tier"
+    description: "High-performance resource allocation for enterprise workloads"
+    resource_quota:
+      requests.cpu: "50"
+      requests.memory: "100Gi"
+      limits.cpu: "50"
+      limits.memory: "100Gi"
+      persistentvolumeclaims: "25"
+      requests.storage: "500Gi"

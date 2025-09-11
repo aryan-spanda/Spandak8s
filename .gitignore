@@ -1,0 +1,91 @@
+# Spandak8s CLI - Git Ignore Configuration
+# 
+# This file specifies which files and directories should be excluded from version control.
+# Keeps the repository clean by ignoring generated files, dependencies, and local configurations.
+
+# Python generated files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Local configuration files
+.spanda/
+config.local.yaml
+*.local.yaml
+
+# Test and coverage files
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+coverage.xml
+
+# Logs and temporary files
+*.log
+*.tmp
+.temp/
+logs/
+
+# Build artifacts
+*.tar.gz
+*.deb
+*.rpm
+*.snap
+
+# Docker
+.dockerignore
+
+# Snap packaging
+prime/
+stage/
+parts/
+*.snap
+
+# Local development
+.env
+.env.local
+.env.*.local
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

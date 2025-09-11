@@ -1,0 +1,90 @@
+name: spandak8s
+base: core22
+version: '0.1.0'
+summary: A CLI for the Spanda AI Platform
+description: |
+  The official command-line tool to manage tenants, modules,
+  and applications on the Spanda AI Platform. Provides imperative
+  control over platform components like MinIO, Spark, Dremio,
+  and other data lake infrastructure.
+
+grade: devel # Change to 'stable' for production releases
+confinement: strict # Use strict confinement for security
+
+parts:
+  # Part 1: Your CLI's source code
+  spanda-cli-code:
+    plugin: python
+    source: .
+    python-packages:
+      - requests
+      - pyyaml
+      - click
+      - kubernetes
+      - helm-python
+      - psycopg2-binary
+      - rich  # For beautiful CLI output
+    stage-packages:
+      - git  # For git operations if needed
+
+  # Part 2: The kubectl binary dependency
+  kubectl:
+    plugin: dump
+    source: https://dl.k8s.io/release/v1.28.3/bin/linux/amd64/kubectl
+    source-type: file
+    organize:
+      kubectl: bin/kubectl
+    stage:
+      - bin/kubectl
+
+  # Part 3: The helm binary dependency  
+  helm:
+    plugin: dump
+    source: https://get.helm.sh/helm-v3.13.2-linux-amd64.tar.gz
+    source-type: tar
+    organize:
+      linux-amd64/helm: bin/helm
+    stage:
+      - bin/helm
+
+  # Part 4: Platform module Helm charts
+  platform-charts:
+    plugin: dump
+    source: ../spandaai-platform-deployment/bare-metal/modules
+    source-type: local
+    organize:
+      "*": charts/
+    stage:
+      - charts/
+
+apps:
+  # Main CLI command
+  spandak8s:
+    command: bin/spandak8s
+    plugs:
+      - home          # Access to ~/.spanda/config and ~/.kube/config
+      - network       # API calls to backend and Kubernetes clusters
+      - network-bind  # If running local backend server
+      - removable-media # Access to external storage if needed
+
+  # Alias for shorter command
+  sk8s:
+    command: bin/spandak8s
+    plugs:
+      - home
+      - network
+      - network-bind
+      - removable-media
+
+# Define the permissions your CLI needs
+plugs:
+  home:
+    read: all
+  network:
+  network-bind:
+  removable-media:
+
+# Layout for organizing files in the snap
+layout:
+  /opt/spandak8s/charts:
+    bind: $SNAP/charts

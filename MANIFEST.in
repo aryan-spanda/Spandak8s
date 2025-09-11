@@ -1,0 +1,14 @@
+include README.md
+include CHANGELOG.md
+include LICENSE
+include requirements.txt
+include config/*.yaml
+include config/*.yml
+recursive-include pkg *.py
+recursive-include cmd *.py
+include spandak8s
+exclude tests/*
+exclude *.pyc
+exclude __pycache__
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]

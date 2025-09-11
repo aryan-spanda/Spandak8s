@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""
+Spandak8s CLI - Main Entry Point
+
+A modern, imperative CLI for managing the Spanda AI Platform.
+Provides direct control over platform modules like MinIO, Spark, Dremio, etc.
+"""
+
+import sys
+import os
+import click
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+
+# Add the package to Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from pkg.config import SpandaConfig
+from pkg.api_client import SpandaAPIClient
+from cmd.modules import modules_group
+from cmd.tenants import tenants_group
+from cmd.status import status_group
+
+console = Console()
+
+@click.group(invoke_without_command=True)
+@click.option('--config', '-c', help='Path to config file', default='~/.spanda/config.yaml')
+@click.option('--debug', '-d', is_flag=True, help='Enable debug output')
+@click.option('--version', '-v', is_flag=True, help='Show version')
+@click.pass_context
+def cli(ctx, config, debug, version):
+    """
+    🚀 Spandak8s - The Spanda AI Platform CLI
+    
+    Manage tenants, modules, and applications with simple commands.
+    """
+    if version:
+        console.print("spandak8s version 0.1.0", style="bold green")
+        return
+        
+    if ctx.invoked_subcommand is None:
+        # Show welcome message when no command is provided
+        welcome_text = Text()
+        welcome_text.append("🚀 Welcome to ", style="bold")
+        welcome_text.append("Spandak8s", style="bold cyan")
+        welcome_text.append("!\n\n", style="bold")
+        welcome_text.append("The imperative CLI for the Spanda AI Platform.\n")
+        welcome_text.append("Get started with: ", style="dim")
+        welcome_text.append("spandak8s --help", style="bold yellow")
+        
+        console.print(Panel(welcome_text, title="Spanda AI Platform CLI", border_style="cyan"))
+        return
+    
+    # Initialize context
+    ctx.ensure_object(dict)
+    ctx.obj['config_path'] = config
+    ctx.obj['debug'] = debug
+    ctx.obj['console'] = console
+    
+    # Load configuration
+    try:
+        ctx.obj['config'] = SpandaConfig(config)
+        ctx.obj['api_client'] = SpandaAPIClient(ctx.obj['config'])
+    except Exception as e:
+        console.print(f"❌ [red]Error loading configuration: {e}[/red]")
+        if debug:
+            import traceback
+            console.print(traceback.format_exc())
+        sys.exit(1)
+
+# Register command groups
+cli.add_command(modules_group, name='modules')
+cli.add_command(tenants_group, name='tenants') 
+cli.add_command(status_group, name='status')
+
+# Quick command aliases
+@cli.command()
+@click.argument('module_name')
+@click.option('--env', '-e', default='dev', help='Environment (dev, staging, prod)')
+@click.option('--config-file', type=click.File('r'), help='YAML config file for advanced settings')
+@click.pass_context
+def enable(ctx, module_name, env, config_file):
+    """Quick command to enable a module. Alias for: modules enable"""
+    from cmd.modules import enable_module
+    ctx.invoke(enable_module, module_name=module_name, env=env, config_file=config_file)
+
+@cli.command()
+@click.argument('module_name')
+@click.option('--env', '-e', default='dev', help='Environment (dev, staging, prod)')
+@click.pass_context  
+def disable(ctx, module_name, env):
+    """Quick command to disable a module. Alias for: modules disable"""
+    from cmd.modules import disable_module
+    ctx.invoke(disable_module, module_name=module_name, env=env)
+
+if __name__ == '__main__':
+    cli()
