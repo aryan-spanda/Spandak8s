@@ -2,7 +2,17 @@
 Spandak8s CLI - Module Management Commands
 
 This module provides comprehensive module management capabilities including:
-- Listing available platform modules (MinIO, Spark, Dremio, etc.)
+- Listing available p        # Check current deployment status
+        console.print("🔍 [dim]Checking current deployment status...[/dim]")
+        try:
+            current_status = api_client.get_module_deployment_status(tenant_name, module_name, env)
+            if current_status.get('deployed', False) and current_status.get('status') == 'running':
+                console.print(f"✅ [green]Module '{module_name}' is already running in {env} environment[/green]")
+                console.print(f"📊 Status: {current_status.get('status')} ({current_status.get('replicas', {}).get('ready', 0)}/{current_status.get('replicas', {}).get('desired', 0)} replicas)")
+                return
+        except Exception:
+            # Status check failed, continue with deployment
+            passules (MinIO, Spark, Dremio, etc.)
 - Generating tenant configuration with resource quotas
 - Managing module health checks and dependencies
 - Displaying module categories and resource tiers
@@ -52,7 +62,7 @@ Commands:
 import click
 from rich.console import Console
 from rich.table import Table
-from rich.panel import Panel
+# Panel import removed - not used in current implementation
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 # NOTE: module_definitions is now passed via context from main CLI (no global import)
@@ -118,58 +128,105 @@ def list_modules(ctx):
 @modules_group.command('enable')
 @click.argument('module_name')
 @click.option('--env', '-e', default=None, help='Environment (dev, staging, prod)')
+@click.option('--tier', '-t', default=None, help='Resource tier (bronze, standard, premium)')
 @click.option('--config-file', type=click.File('r'), help='YAML config file for advanced settings')
 @click.pass_context
-def enable_module(ctx, module_name, env, config_file):
+def enable_module(ctx, module_name, env, tier, config_file):
     """Enable a platform module for your tenant"""
     config = ctx.obj['config']
     api_client = ctx.obj['api_client']
     
-    # Use default environment if not specified
-    if env is None:
-        env = config.default_environment
+    # Ensure backend is running
+    # if not api_client.ensure_backend_running():
+    #     return
     
-    tenant_name = config.tenant_name
+    # Use default values if not specified
+    if env is None:
+        env = config.get('defaults.environment', 'dev')
+    
+    if tier is None:
+        tier = config.get('defaults.tier', 'bronze')
+    
+    tenant_name = config.get('tenant.name', 'default')
     
     try:
-        # Build module configuration - platform determines resources
+        # Check if module exists first
+        console.print(f"🔍 [dim]Checking module '{module_name}' availability...[/dim]")
+        
+        # Validate module exists by getting its details
+        try:
+            module_details = api_client.get_module_details(module_name)
+            console.print(f"📦 [cyan]Module: {module_details.get('display_name', module_name)}[/cyan]")
+            console.print(f"📝 [dim]{module_details.get('description', 'No description available')}[/dim]")
+        except Exception:
+            console.print(f"❌ [red]Module '{module_name}' not found in catalog[/red]")
+            return
+        
+        # Check current deployment status
+        console.print(f"🔍 [dim]Checking current deployment status...[/dim]")
+        try:
+            current_status = api_client.get_module_deployment_status(tenant_name, module_name, env)
+            if current_status.get('deployed', False) and current_status.get('status') == 'running':
+                console.print(f"✅ [green]Module '{module_name}' is already running in {env} environment[/green]")
+                console.print(f"📊 Status: {current_status.get('status')} ({current_status.get('replicas', {}).get('ready', 0)}/{current_status.get('replicas', {}).get('desired', 0)} replicas)")
+                return
+        except Exception:
+            # Status check failed, continue with deployment
+            pass
+        
+        # Build module configuration
         module_config = {
             'environment': env,
             'tenant': tenant_name,
-            'module': module_name
+            'module': module_name,
+            'tier': tier
         }
         
         # Load additional config from file if provided
         if config_file:
             import yaml
-            file_config = yaml.safe_load(config_file)
-            module_config.update(file_config)
+            try:
+                file_config = yaml.safe_load(config_file)
+                module_config.update(file_config)
+                console.print("📋 [dim]Additional configuration loaded from file[/dim]")
+            except Exception as e:
+                console.print(f"⚠️ [yellow]Warning: Could not load config file: {e}[/yellow]")
         
-        console.print(f"🚀 [cyan]Enabling module '{module_name}' for tenant '{tenant_name}' in environment '{env}'[/cyan]")
-        console.print("📋 [dim]Platform will determine optimal resource allocation based on tenant quotas[/dim]")
-        
-        if module_config.get('config_file'):
-            console.print("📋 [dim]Additional configuration loaded from file[/dim]")
+        console.print(f"🚀 [cyan]Enabling module '{module_name}' for tenant '{tenant_name}'[/cyan]")
+        console.print(f"🏷️  Environment: [green]{env}[/green]")
+        console.print(f"🎯 Resource Tier: [green]{tier}[/green]")
+        console.print(f"🏢 Namespace: [cyan]{tenant_name}-{env}[/cyan]")
         
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=console
         ) as progress:
-            progress.add_task("Deploying module...", total=None)
+            progress.add_task("Deploying module with Helm...", total=None)
             result = api_client.enable_module(tenant_name, env, module_name, module_config)
         
         console.print(f"✅ [green]Successfully enabled '{module_name}'![/green]")
         
-        if 'status' in result:
-            console.print(f"📊 Status: {result['status']}")
+        # Display deployment details
         if 'namespace' in result:
-            console.print(f"🏷️  Namespace: {result['namespace']}")
-        if 'endpoint' in result:
-            console.print(f"🌐 Endpoint: {result['endpoint']}")
+            console.print(f"🏷️  Namespace: [cyan]{result['namespace']}[/cyan]")
+        
+        if 'deployment' in result and 'release_name' in result['deployment']:
+            console.print(f"📦 Helm Release: [cyan]{result['deployment']['release_name']}[/cyan]")
+        
+        if 'status' in result and result['status'].get('deployed'):
+            status_info = result['status']
+            console.print(f"📊 Status: [green]{status_info.get('status', 'running')}[/green]")
+            
+            replicas = status_info.get('replicas', {})
+            if replicas:
+                console.print(f"🔢 Replicas: {replicas.get('ready', 0)}/{replicas.get('desired', 0)}")
+        
+        console.print(f"💡 [dim]Check status with: spandak8s modules status {module_name}[/dim]")
             
     except Exception as e:
         console.print(f"❌ [red]Error enabling module '{module_name}': {e}[/red]")
+        console.print("💡 [dim]Try checking: spandak8s status cluster[/dim]")
 
 @modules_group.command('disable')
 @click.argument('module_name')
@@ -181,19 +238,37 @@ def disable_module(ctx, module_name, env, force):
     config = ctx.obj['config']
     api_client = ctx.obj['api_client']
     
-    # Use default environment if not specified
-    if env is None:
-        env = config.default_environment
+    # Ensure backend is running
+    # if not api_client.ensure_backend_running():
+    #     return
     
-    tenant_name = config.tenant_name
+    # Use default values if not specified
+    if env is None:
+        env = config.get('defaults.environment', 'dev')
+    
+    tenant_name = config.get('tenant.name', 'default')
     
     try:
+        # Check current deployment status first
+        console.print("🔍 [dim]Checking current deployment status...[/dim]")
+        try:
+            current_status = api_client.get_module_deployment_status(tenant_name, module_name, env)
+            if not current_status.get('deployed', False):
+                console.print(f"ℹ️ [yellow]Module '{module_name}' is not currently deployed in {env} environment[/yellow]")
+                return
+        except Exception:
+            # Status check failed, continue anyway
+            console.print("⚠️ [yellow]Could not check deployment status, proceeding with disable...[/yellow]")
+        
         if not force:
-            if not click.confirm(f"Are you sure you want to disable '{module_name}' in '{env}' environment?"):
+            console.print(f"⚠️  [yellow]This will remove '{module_name}' and all its data from '{env}' environment[/yellow]")
+            if not click.confirm(f"Are you sure you want to disable '{module_name}'?"):
                 console.print("❌ [yellow]Operation cancelled[/yellow]")
                 return
         
-        console.print(f"🛑 [cyan]Disabling module '{module_name}' for tenant '{tenant_name}' in environment '{env}'[/cyan]")
+        console.print(f"🛑 [cyan]Disabling module '{module_name}' for tenant '{tenant_name}'[/cyan]")
+        console.print(f"🏷️  Environment: [yellow]{env}[/yellow]")
+        console.print(f"🏢 Namespace: [cyan]{tenant_name}-{env}[/cyan]")
         
         with Progress(
             SpinnerColumn(),
@@ -216,15 +291,19 @@ def disable_module(ctx, module_name, env, force):
 @click.option('--env', '-e', default=None, help='Environment (dev, staging, prod)')
 @click.pass_context
 def module_status(ctx, module_name, env):
-    """Get status and configuration of a specific module"""
+    """Check the deployment status of a specific module"""
     config = ctx.obj['config']
     api_client = ctx.obj['api_client']
     
-    # Use default environment if not specified
-    if env is None:
-        env = config.default_environment
+    # Ensure backend is running
+    # if not api_client.ensure_backend_running():
+    #     return
     
-    tenant_name = config.tenant_name
+    # Use default values if not specified
+    if env is None:
+        env = config.get('defaults.environment', 'dev')
+    
+    tenant_name = config.get('tenant.name', 'default')
     
     try:
         with Progress(
@@ -232,29 +311,53 @@ def module_status(ctx, module_name, env):
             TextColumn("[progress.description]{task.description}"),
             console=console
         ) as progress:
-            progress.add_task("Fetching module status...", total=None)
-            module_config = api_client.get_module_config(tenant_name, env, module_name)
+            progress.add_task("Checking module status...", total=None)
+            status = api_client.get_module_deployment_status(tenant_name, module_name, env)
         
-        # Display module status in a nice panel
-        status_text = f"[bold cyan]{module_name}[/bold cyan] in [yellow]{env}[/yellow] environment\n\n"
+        console.print(f"📊 [cyan]Module Status: {module_name}[/cyan]")
+        console.print(f"🏢 Tenant: [green]{tenant_name}[/green]")
+        console.print(f"🏷️  Environment: [green]{env}[/green]")
+        console.print(f"🏗️  Namespace: [cyan]{status.get('namespace', 'unknown')}[/cyan]")
         
-        if 'status' in module_config:
-            status = module_config['status']
-            status_color = "green" if status == "running" else "red" if status == "failed" else "yellow"
-            status_text += f"Status: [{status_color}]{status}[/{status_color}]\n"
+        # Status indicator
+        deployed = status.get('deployed', False)
+        if deployed:
+            module_status = status.get('status', 'unknown')
+            if module_status == 'running':
+                status_display = "[green]✅ Running[/green]"
+            elif module_status == 'degraded':
+                status_display = "[yellow]⚠️  Degraded[/yellow]"
+            elif module_status == 'failed':
+                status_display = "[red]❌ Failed[/red]"
+            else:
+                status_display = f"[dim]❓ {module_status}[/dim]"
+        else:
+            status_display = "[red]🔴 Not Deployed[/red]"
         
-        if 'namespace' in module_config:
-            status_text += f"Namespace: {module_config['namespace']}\n"
+        console.print(f"📈 Status: {status_display}")
         
-        if 'config' in module_config:
-            status_text += "\n[bold]Configuration:[/bold]\n"
-            for key, value in module_config['config'].items():
-                status_text += f"  • {key}: {value}\n"
+        # Replica information
+        replicas = status.get('replicas', {})
+        if replicas and replicas.get('desired', 0) > 0:
+            ready = replicas.get('ready', 0)
+            desired = replicas.get('desired', 0)
+            console.print(f"🔢 Replicas: {ready}/{desired}")
+            
+            if ready == desired:
+                console.print("✅ [green]All replicas are ready[/green]")
+            elif ready > 0:
+                console.print("⚠️ [yellow]Some replicas are not ready[/yellow]")
+            else:
+                console.print("❌ [red]No replicas are ready[/red]")
         
-        console.print(Panel(status_text, title="📊 Module Status", border_style="cyan"))
-        
+        # Last checked time
+        if 'last_checked' in status:
+            console.print(f"🕐 Last Checked: [dim]{status['last_checked']}[/dim]")
+            
     except Exception as e:
-        console.print(f"❌ [red]Error getting status for '{module_name}': {e}[/red]")
+        console.print(f"❌ [red]Error checking status for '{module_name}': {e}[/red]")
+
+# Remove duplicate function - already defined above
 
 @modules_group.command('configure')
 @click.argument('module_name')

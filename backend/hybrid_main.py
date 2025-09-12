@@ -55,15 +55,27 @@ JWT_SECRET = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24
 
-# Initialize Kubernetes client
+# Initialize Kubernetes client  
 try:
     config.load_incluster_config()  # If running in cluster
 except Exception:
     try:
-        config.load_kube_config()  # If running locally
-        logger.info("Loaded local kubeconfig")
+        # Try to load from WSL kubeconfig first
+        import os
+        wsl_kubeconfig = os.path.expanduser("~/.kube/config")
+        if not os.path.exists(wsl_kubeconfig):
+            # If Windows kubeconfig doesn't exist, try to access WSL kubeconfig
+            wsl_kubeconfig = "/mnt/c/Users/" + os.getenv("USERNAME", "user") + "/.kube/config"
+        
+        config.load_kube_config(config_file=wsl_kubeconfig)
+        logger.info("Loaded kubeconfig for WSL Kubernetes cluster")
     except Exception as e:
-        logger.warning(f"Could not load Kubernetes config: {e}")
+        try:
+            # Fallback to default kubeconfig loading
+            config.load_kube_config()
+            logger.info("Loaded local kubeconfig")
+        except Exception as e2:
+            logger.warning(f"Could not load Kubernetes config: {e2}")
         
 k8s_core = client.CoreV1Api()
 k8s_apps = client.AppsV1Api()
@@ -86,7 +98,7 @@ def load_module_definitions():
         }
     
     try:
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             definitions = yaml.safe_load(f)
             logger.info(f"Loaded {len(definitions.get('modules', {}))} module definitions")
             return definitions
@@ -284,13 +296,13 @@ async def health_check():
     )
 
 @app.get("/api/v1/modules/definitions")
-async def get_module_definitions_api(user: dict = Depends(get_current_user)):
+async def get_module_definitions_api():  # user: dict = Depends(get_current_user)
     """Get complete module definitions from YAML file"""
-    logger.info(f"User {user['username']} requested module definitions")
+    logger.info(f"Guest user requested module definitions")  # User {user['username']} requested module definitions
     return get_module_definitions()
 
 @app.get("/api/v1/modules")
-async def list_modules(user: dict = Depends(get_current_user)):
+async def list_modules():  # user: dict = Depends(get_current_user)
     """Get list of all available platform modules"""
     definitions = get_module_definitions()
     modules = []
@@ -307,7 +319,7 @@ async def list_modules(user: dict = Depends(get_current_user)):
     return {"modules": modules}
 
 @app.get("/api/v1/modules/{module_name}")
-async def get_module_details(module_name: str, user: dict = Depends(get_current_user)):
+async def get_module_details(module_name: str):  # user: dict = Depends(get_current_user)
     """Get detailed information about a specific module"""
     definitions = get_module_definitions()
     modules = definitions.get("modules", {})
@@ -573,6 +585,336 @@ async def get_platform_status(user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Error getting platform status: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get platform status: {e}")
+
+# Module Deployment Helper Functions
+def get_module_deployment_path(module_name: str) -> Path:
+    """Get the path to module deployment files"""
+    # Assume spandaai-platform-deployment is a sibling directory to Spandak8s
+    base_path = Path(__file__).parent.parent.parent / "spandaai-platform-deployment" / "bare-metal" / "modules"
+    module_path = base_path / module_name
+    
+    if not module_path.exists():
+        raise HTTPException(status_code=404, detail=f"Module deployment files not found for '{module_name}'")
+    
+    return module_path
+
+def is_module_deployed(namespace: str, module_name: str) -> Dict[str, Any]:
+    """Check if a module is already deployed in the tenant namespace"""
+    try:
+        # Look for deployments with the module label
+        deployments = k8s_apps.list_namespaced_deployment(
+            namespace=namespace,
+            label_selector=f"spanda.ai/module={module_name}"
+        )
+        
+        # Look for statefulsets with the module label
+        statefulsets = k8s_apps.list_namespaced_stateful_set(
+            namespace=namespace,
+            label_selector=f"spanda.ai/module={module_name}"
+        )
+        
+        is_deployed = len(deployments.items) > 0 or len(statefulsets.items) > 0
+        
+        if is_deployed:
+            # Get status from deployments
+            total_replicas = 0
+            ready_replicas = 0
+            
+            for deployment in deployments.items:
+                total_replicas += deployment.status.replicas or 0
+                ready_replicas += deployment.status.ready_replicas or 0
+                
+            for statefulset in statefulsets.items:
+                total_replicas += statefulset.status.replicas or 0
+                ready_replicas += statefulset.status.ready_replicas or 0
+            
+            status = "running"
+            if ready_replicas == 0:
+                status = "failed"
+            elif ready_replicas < total_replicas:
+                status = "degraded"
+                
+            return {
+                "deployed": True,
+                "status": status,
+                "replicas": {
+                    "desired": total_replicas,
+                    "ready": ready_replicas
+                }
+            }
+        else:
+            return {
+                "deployed": False,
+                "status": "not_deployed",
+                "replicas": {
+                    "desired": 0,
+                    "ready": 0
+                }
+            }
+            
+    except Exception as e:
+        logger.error(f"Error checking module deployment status: {e}")
+        return {
+            "deployed": False,
+            "status": "unknown",
+            "error": str(e)
+        }
+
+def deploy_module_with_helm(module_name: str, namespace: str, tenant_tier: str = "bronze") -> Dict[str, Any]:
+    """Deploy a module using Helm"""
+    import subprocess
+    
+    try:
+        module_path = get_module_deployment_path(module_name)
+        helm_path = module_path / "helm"
+        
+        if not helm_path.exists():
+            raise HTTPException(status_code=400, detail=f"Helm charts not found for module '{module_name}'")
+        
+        # Determine values file based on environment
+        values_file = helm_path / "values.yaml"  # Default
+        if (helm_path / f"values-{tenant_tier}.yaml").exists():
+            values_file = helm_path / f"values-{tenant_tier}.yaml"
+        
+        # Create release name
+        release_name = f"{namespace}-{module_name}"
+        
+        # Build helm command for WSL
+        # Convert Windows paths to WSL paths
+        wsl_helm_path = str(helm_path).replace('\\', '/').replace('C:', '/mnt/c')
+        wsl_values_file = str(values_file).replace('\\', '/').replace('C:', '/mnt/c')
+        
+        helm_cmd = [
+            "wsl", "bash", "-c",
+            f"helm upgrade --install {release_name} '{wsl_helm_path}' "
+            f"--namespace {namespace} --create-namespace "
+            f"--values '{wsl_values_file}' "
+            f"--set global.namespace={namespace} "
+            f"--set namespace={namespace} "
+            f"--set tenant.name={namespace} "
+            f"--set tenant.tier={tenant_tier} "
+            f"--set module.name={module_name} "
+            f"--set spandaTenant={namespace.split('-')[0]} "
+            f"--set spandaEnvironment={namespace.split('-')[1] if '-' in namespace else 'dev'} "
+            f"--wait --timeout=300s"
+        ]
+        
+        logger.info(f"Deploying module {module_name} to {namespace} with WSL command: {' '.join(helm_cmd)}")
+        
+        # Execute helm command via WSL
+        result = subprocess.run(
+            helm_cmd,
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minutes timeout
+        )
+        
+        if result.returncode == 0:
+            return {
+                "success": True,
+                "release_name": release_name,
+                "namespace": namespace,
+                "output": result.stdout,
+                "deployment_method": "helm"
+            }
+        else:
+            logger.error(f"Helm deployment failed: {result.stderr}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Module deployment failed: {result.stderr}"
+            )
+            
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=408, detail="Module deployment timed out")
+    except Exception as e:
+        import traceback
+        logger.error(f"Error deploying module {module_name}: {e}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Deployment failed: {str(e)}")
+
+def undeploy_module_with_helm(module_name: str, namespace: str) -> Dict[str, Any]:
+    """Undeploy a module using Helm"""
+    import subprocess
+    
+    try:
+        release_name = f"{namespace}-{module_name}"
+        
+        # Build helm uninstall command for WSL
+        helm_cmd = [
+            "wsl", "bash", "-c",
+            f"helm uninstall {release_name} --namespace {namespace} --wait --timeout=300s"
+        ]
+        
+        logger.info(f"Undeploying module {module_name} from {namespace} with WSL command: {' '.join(helm_cmd)}")
+        
+        # Execute helm command via WSL
+        result = subprocess.run(
+            helm_cmd,
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+        
+        if result.returncode == 0:
+            return {
+                "success": True,
+                "release_name": release_name,
+                "namespace": namespace,
+                "output": result.stdout,
+                "deployment_method": "helm"
+            }
+        else:
+            # Check if it's just because release doesn't exist
+            if "not found" in result.stderr.lower():
+                return {
+                    "success": True,
+                    "message": "Module was not deployed or already removed",
+                    "release_name": release_name,
+                    "namespace": namespace
+                }
+            else:
+                logger.error(f"Helm uninstall failed: {result.stderr}")
+                raise HTTPException(
+                    status_code=500, 
+                    detail=f"Module removal failed: {result.stderr}"
+                )
+                
+    except Exception as e:
+        logger.error(f"Error undeploying module {module_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Removal failed: {e}")
+
+# Module Deployment API Endpoints
+@app.post("/api/v1/tenants/{tenant_name}/modules/{module_name}/enable")
+async def enable_module(
+    tenant_name: str, 
+    module_name: str,
+    environment: str = "dev",
+    tier: str = "bronze"
+    # user: dict = Depends(get_current_user)
+):
+    """Enable/deploy a specific module for a tenant"""
+    try:
+        # Validate module exists in definitions
+        definitions = get_module_definitions()
+        available_modules = definitions.get("modules", {})
+        
+        if module_name not in available_modules:
+            raise HTTPException(status_code=404, detail=f"Module '{module_name}' not found in definitions")
+        
+        # Check if module is already deployed
+        namespace = f"{tenant_name}-{environment}"
+        deployment_status = is_module_deployed(namespace, module_name)
+        
+        if deployment_status["deployed"]:
+            if deployment_status["status"] == "running":
+                return {
+                    "success": True,
+                    "message": f"Module '{module_name}' is already running",
+                    "status": deployment_status,
+                    "namespace": namespace
+                }
+            else:
+                # Module exists but not healthy, try to redeploy
+                logger.warning(f"Module {module_name} exists but status is {deployment_status['status']}, redeploying...")
+        
+        # Deploy the module
+        logger.info(f"Deploying module {module_name} for tenant {tenant_name} in {environment} environment")
+        
+        deployment_result = deploy_module_with_helm(module_name, namespace, tier)
+        
+        # Wait a moment and check final status
+        import time
+        time.sleep(5)  # Give Kubernetes time to update
+        
+        final_status = is_module_deployed(namespace, module_name)
+        
+        return {
+            "success": True,
+            "message": f"Module '{module_name}' successfully enabled",
+            "deployment": deployment_result,
+            "status": final_status,
+            "namespace": namespace,
+            "tenant": tenant_name,
+            "environment": environment,
+            "tier": tier
+        }
+        
+    except Exception as e:
+        import traceback
+        logger.error(f"Error enabling module {module_name} for tenant {tenant_name}: {e}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to enable module: {str(e)}")
+
+@app.post("/api/v1/tenants/{tenant_name}/modules/{module_name}/disable") 
+async def disable_module(
+    tenant_name: str,
+    module_name: str, 
+    environment: str = "dev"
+    # user: dict = Depends(get_current_user)
+):
+    """Disable/undeploy a specific module for a tenant"""
+    try:
+        namespace = f"{tenant_name}-{environment}"
+        
+        # Check if module is currently deployed
+        deployment_status = is_module_deployed(namespace, module_name)
+        
+        if not deployment_status["deployed"]:
+            return {
+                "success": True,
+                "message": f"Module '{module_name}' is already disabled",
+                "namespace": namespace
+            }
+        
+        # Undeploy the module
+        logger.info(f"Disabling module {module_name} for tenant {tenant_name} in {environment} environment")
+        
+        undeployment_result = undeploy_module_with_helm(module_name, namespace)
+        
+        # Wait and verify removal
+        import time
+        time.sleep(5)
+        
+        final_status = is_module_deployed(namespace, module_name)
+        
+        return {
+            "success": True,
+            "message": f"Module '{module_name}' successfully disabled",
+            "undeployment": undeployment_result,
+            "status": final_status,
+            "namespace": namespace,
+            "tenant": tenant_name,
+            "environment": environment
+        }
+        
+    except Exception as e:
+        logger.error(f"Error disabling module {module_name} for tenant {tenant_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to disable module: {e}")
+
+@app.get("/api/v1/tenants/{tenant_name}/modules/{module_name}/status")
+async def get_module_deployment_status(
+    tenant_name: str,
+    module_name: str,
+    environment: str = "dev"
+    # user: dict = Depends(get_current_user)
+):
+    """Get the deployment status of a specific module for a tenant"""
+    try:
+        namespace = f"{tenant_name}-{environment}"
+        deployment_status = is_module_deployed(namespace, module_name)
+        
+        return {
+            "module_name": module_name,
+            "tenant": tenant_name,
+            "environment": environment,
+            "namespace": namespace,
+            **deployment_status,
+            "last_checked": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting module status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get module status: {e}")
 
 if __name__ == "__main__":
     import uvicorn

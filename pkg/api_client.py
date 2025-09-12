@@ -43,17 +43,48 @@ class SpandaAPIClient:
         """Make HTTP request with error handling"""
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         
+        # Use custom timeout if provided, otherwise use default
+        timeout = kwargs.pop('timeout', self.timeout)
+        
         try:
             response = self.session.request(
                 method=method,
                 url=url,
-                timeout=self.timeout,
+                timeout=timeout,
                 **kwargs
             )
             response.raise_for_status()
             return response
         except requests.exceptions.RequestException as e:
             raise Exception(f"API request failed: {e}")
+    
+    def is_backend_running(self) -> bool:
+        """Check if the hybrid backend is running"""
+        try:
+            self.health_check()
+            return True
+        except Exception:
+            return False
+    
+    def ensure_backend_running(self) -> bool:
+        """Ensure backend is running, with helpful error messages if not"""
+        if self.is_backend_running():
+            return True
+        
+        from rich.console import Console
+        console = Console()
+        
+        console.print("❌ [red]Hybrid backend is not running![/red]")
+        console.print()
+        console.print("🚀 [cyan]To start the backend:[/cyan]")
+        console.print("   1. Open PowerShell in the backend directory")
+        console.print("   2. Run: [yellow].\\.\\venv\\Scripts\\Activate.ps1[/yellow]")
+        console.print("   3. Run: [yellow]python -m uvicorn hybrid_main:app --reload --host 0.0.0.0 --port 8000[/yellow]")
+        console.print()
+        console.print("💡 [dim]Or use the simple script: .\\start-simple.ps1[/dim]")
+        console.print()
+        
+        return False
     
     # Authentication methods
     def login(self, username: str, password: str) -> Dict[str, Any]:
@@ -161,4 +192,40 @@ class SpandaAPIClient:
         """Get overall platform status from Kubernetes"""
         endpoint = "/api/v1/platform/status"
         response = self._make_request('GET', endpoint)
+        return response.json()
+    
+    # Module deployment methods
+    def enable_module(self, tenant_name: str, environment: str, module_name: str, 
+                     module_config: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Enable/deploy a module for a specific tenant"""
+        endpoint = f"/api/v1/tenants/{tenant_name}/modules/{module_name}/enable"
+        
+        # Extract tier and other params from module_config
+        params = {
+            'environment': environment,
+            'tier': 'bronze'  # default
+        }
+        
+        if module_config:
+            if 'tier' in module_config:
+                params['tier'] = module_config['tier']
+        
+        response = self._make_request('POST', endpoint, params=params, timeout=self.timeout * 3)
+        return response.json()
+    
+    def disable_module(self, tenant_name: str, environment: str, module_name: str) -> Dict[str, Any]:
+        """Disable/undeploy a module for a specific tenant"""
+        endpoint = f"/api/v1/tenants/{tenant_name}/modules/{module_name}/disable"
+        params = {'environment': environment}
+        
+        response = self._make_request('POST', endpoint, params=params, timeout=self.timeout * 3)
+        return response.json()
+    
+    def get_module_deployment_status(self, tenant_name: str, module_name: str, 
+                                   environment: str = "dev") -> Dict[str, Any]:
+        """Get deployment status of a specific module for a tenant"""
+        endpoint = f"/api/v1/tenants/{tenant_name}/modules/{module_name}/status"
+        params = {'environment': environment}
+        
+        response = self._make_request('GET', endpoint, params=params)
         return response.json()
