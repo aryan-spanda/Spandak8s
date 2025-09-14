@@ -85,6 +85,90 @@ def list_tenants(ctx):
     except Exception as e:
         console.print(f"❌ [red]Error listing tenants: {e}[/red]")
 
+@tenants_group.command('create')
+@click.argument('tenant_name')
+@click.option('--cpu-quota', default="20", help='CPU quota for the tenant')
+@click.option('--memory-quota', default="40Gi", help='Memory quota for the tenant')
+@click.option('--storage-quota', default="100Gi", help='Storage quota for the tenant')
+@click.option('--pvc-quota', default="15", help='PVC quota for the tenant')
+@click.option('--git-org', default="aryan-spanda", help='GitHub organization')
+@click.option('--environments', default="dev", help='Environments (comma-separated)')
+@click.option('--description', help='Tenant description')
+@click.pass_context
+def create_tenant(ctx, tenant_name, cpu_quota, memory_quota, storage_quota, pvc_quota, git_org, environments, description):
+    """Create a new tenant with infrastructure setup"""
+    import subprocess
+    import os
+    from pathlib import Path
+    
+    config = ctx.obj['config']
+    api_client = ctx.obj['api_client']
+    
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console
+        ) as progress:
+            
+            # Step 1: Create tenant configuration in config-repo
+            progress.add_task("Creating tenant configuration...", total=None)
+            
+            config_repo_path = Path("C:/Users/aryan/OneDrive/Documents/spanda docs/config-repo")
+            tenant_sources_file = config_repo_path / "tenants" / "tenant-sources.yml"
+            
+            # Add tenant to tenant-sources.yml
+            tenant_config = f"""
+  # {tenant_name.title()} Tenant
+  - name: "{tenant_name}"
+    git_org: "{git_org}"
+    description: "{description or f'{tenant_name.title()} tenant for platform services'}"
+    cpu_quota: "{cpu_quota}"
+    memory_quota: "{memory_quota}"
+    storage_quota: "{storage_quota}"
+    pvc_quota: "{pvc_quota}"
+    gpu_quota: "0"
+    environments: {environments.split(',')}
+    modules: []  # Start with no modules enabled
+"""
+            
+            # Step 2: Run onboard-tenants.sh script
+            progress.add_task("Running tenant onboarding script...", total=None)
+            
+            scripts_path = config_repo_path / "scripts"
+            result = subprocess.run(
+                ["bash", "onboard-tenants.sh", tenant_name],
+                cwd=scripts_path,
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode != 0:
+                console.print(f"❌ [red]Error running onboard script: {result.stderr}[/red]")
+                return
+            
+            # Step 3: Create namespace and apply basic resources
+            progress.add_task("Creating Kubernetes namespace and quotas...", total=None)
+            
+            # Apply the generated tenant configuration
+            tenant_infra_path = config_repo_path / "tenants" / "infrastructure"
+            
+            result = subprocess.run([
+                "kubectl", "apply", "-f", f"{tenant_infra_path}/{tenant_name}-values.yaml"
+            ], capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                console.print(f"❌ [red]Error applying tenant configuration: {result.stderr}[/red]")
+                return
+            
+        console.print(f"✅ [green]Tenant '{tenant_name}' created successfully![/green]")
+        console.print(f"🏢 Namespace: {tenant_name}-dev")
+        console.print(f"📊 Resources: {cpu_quota} CPU, {memory_quota} Memory, {storage_quota} Storage, {pvc_quota} PVCs")
+        console.print(f"🚀 Ready to deploy modules with: [cyan]spandak8s modules enable <module-name> --tenant {tenant_name}[/cyan]")
+        
+    except Exception as e:
+        console.print(f"❌ [red]Error creating tenant: {e}[/red]")
+
 @tenants_group.command('info')
 @click.argument('tenant_name', required=False)
 @click.pass_context
@@ -144,66 +228,7 @@ def tenant_info(ctx, tenant_name):
     except Exception as e:
         console.print(f"❌ [red]Error getting tenant info: {e}[/red]")
 
-@tenants_group.command('create')
-@click.argument('tenant_name')
-@click.option('--description', help='Tenant description')
-@click.option('--cpu-quota', default='10', help='CPU quota (default: 10)')
-@click.option('--memory-quota', default='20Gi', help='Memory quota (default: 20Gi)')
-@click.option('--storage-quota', default='50Gi', help='Storage quota (default: 50Gi)')
-@click.option('--environments', default='dev,staging,prod', help='Comma-separated environments (default: dev,staging,prod)')
-@click.pass_context
-def create_tenant(ctx, tenant_name, description, cpu_quota, memory_quota, storage_quota, environments):
-    """Create a new tenant"""
-    api_client = ctx.obj['api_client']
-    
-    try:
-        # Parse environments
-        env_list = [env.strip() for env in environments.split(',')]
-        
-        # Build tenant data
-        tenant_data = {
-            'name': tenant_name,
-            'description': description or f'Tenant {tenant_name}',
-            'resource_quota': {
-                'cpu': cpu_quota,
-                'memory': memory_quota,
-                'storage': storage_quota
-            },
-            'environments': env_list
-        }
-        
-        console.print(f"🏗️ [cyan]Creating tenant '{tenant_name}'[/cyan]")
-        console.print("📋 [dim]Configuration:[/dim]")
-        console.print(f"   • Description: {tenant_data['description']}")
-        console.print(f"   • CPU Quota: {cpu_quota}")
-        console.print(f"   • Memory Quota: {memory_quota}")
-        console.print(f"   • Storage Quota: {storage_quota}")
-        console.print(f"   • Environments: {', '.join(env_list)}")
-        
-        if not click.confirm("\nProceed with tenant creation?"):
-            console.print("❌ [yellow]Operation cancelled[/yellow]")
-            return
-        
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console
-        ) as progress:
-            progress.add_task("Creating tenant...", total=None)
-            result = api_client.create_tenant(tenant_data)
-        
-        console.print(f"✅ [green]Successfully created tenant '{tenant_name}'![/green]")
-        
-        if 'namespaces' in result:
-            console.print("🏷️  Created namespaces:")
-            for namespace in result['namespaces']:
-                console.print(f"   • {namespace}")
-        
-        console.print("\n💡 [dim]You can now configure your CLI to use this tenant:[/dim]")
-        console.print(f"[yellow]spandak8s config set tenant.name {tenant_name}[/yellow]")
-        
-    except Exception as e:
-        console.print(f"❌ [red]Error creating tenant: {e}[/red]")
+
 
 @tenants_group.command('switch')
 @click.argument('tenant_name')

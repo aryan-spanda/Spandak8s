@@ -128,10 +128,9 @@ def list_modules(ctx):
 @modules_group.command('enable')
 @click.argument('module_name')
 @click.option('--env', '-e', default=None, help='Environment (dev, staging, prod)')
-@click.option('--tier', '-t', default=None, help='Resource tier (bronze, standard, premium)')
 @click.option('--config-file', type=click.File('r'), help='YAML config file for advanced settings')
 @click.pass_context
-def enable_module(ctx, module_name, env, tier, config_file):
+def enable_module(ctx, module_name, env, config_file):
     """Enable a platform module for your tenant"""
     config = ctx.obj['config']
     api_client = ctx.obj['api_client']
@@ -143,9 +142,6 @@ def enable_module(ctx, module_name, env, tier, config_file):
     # Use default values if not specified
     if env is None:
         env = config.get('defaults.environment', 'dev')
-    
-    if tier is None:
-        tier = config.get('defaults.tier', 'bronze')
     
     tenant_name = config.get('tenant.name', 'default')
     
@@ -178,8 +174,7 @@ def enable_module(ctx, module_name, env, tier, config_file):
         module_config = {
             'environment': env,
             'tenant': tenant_name,
-            'module': module_name,
-            'tier': tier
+            'module': module_name
         }
         
         # Load additional config from file if provided
@@ -194,8 +189,7 @@ def enable_module(ctx, module_name, env, tier, config_file):
         
         console.print(f"🚀 [cyan]Enabling module '{module_name}' for tenant '{tenant_name}'[/cyan]")
         console.print(f"🏷️  Environment: [green]{env}[/green]")
-        console.print(f"🎯 Resource Tier: [green]{tier}[/green]")
-        console.print(f"🏢 Namespace: [cyan]{tenant_name}-{env}[/cyan]")
+        console.print(f" Namespace: [cyan]{tenant_name}-{env}[/cyan]")
         
         with Progress(
             SpinnerColumn(),

@@ -671,10 +671,8 @@ def deploy_module_with_helm(module_name: str, namespace: str, tenant_tier: str =
         if not helm_path.exists():
             raise HTTPException(status_code=400, detail=f"Helm charts not found for module '{module_name}'")
         
-        # Determine values file based on environment
-        values_file = helm_path / "values.yaml"  # Default
-        if (helm_path / f"values-{tenant_tier}.yaml").exists():
-            values_file = helm_path / f"values-{tenant_tier}.yaml"
+        # Use default values file
+        values_file = helm_path / "values.yaml"
         
         # Create release name
         release_name = f"{namespace}-{module_name}"
@@ -802,7 +800,8 @@ async def enable_module(
             raise HTTPException(status_code=404, detail=f"Module '{module_name}' not found in definitions")
         
         # Check if module is already deployed
-        namespace = f"{tenant_name}-{environment}"
+        # Use environment directly as namespace since it already includes tenant context
+        namespace = environment
         deployment_status = is_module_deployed(namespace, module_name)
         
         if deployment_status["deployed"]:
@@ -854,7 +853,8 @@ async def disable_module(
 ):
     """Disable/undeploy a specific module for a tenant"""
     try:
-        namespace = f"{tenant_name}-{environment}"
+        # Use environment directly as namespace since it already includes tenant context
+        namespace = environment
         
         # Check if module is currently deployed
         deployment_status = is_module_deployed(namespace, module_name)
@@ -900,7 +900,8 @@ async def get_module_deployment_status(
 ):
     """Get the deployment status of a specific module for a tenant"""
     try:
-        namespace = f"{tenant_name}-{environment}"
+        # Use environment directly as namespace since it already includes tenant context
+        namespace = environment
         deployment_status = is_module_deployed(namespace, module_name)
         
         return {

@@ -200,15 +200,10 @@ class SpandaAPIClient:
         """Enable/deploy a module for a specific tenant"""
         endpoint = f"/api/v1/tenants/{tenant_name}/modules/{module_name}/enable"
         
-        # Extract tier and other params from module_config
+        # Extract params from module_config  
         params = {
-            'environment': environment,
-            'tier': 'bronze'  # default
+            'environment': environment
         }
-        
-        if module_config:
-            if 'tier' in module_config:
-                params['tier'] = module_config['tier']
         
         response = self._make_request('POST', endpoint, params=params, timeout=self.timeout * 3)
         return response.json()
