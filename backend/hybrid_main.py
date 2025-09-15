@@ -692,6 +692,7 @@ def deploy_module_with_helm(module_name: str, namespace: str, tenant_tier: str =
             f"--set tenant.name={namespace} "
             f"--set tenant.tier={tenant_tier} "
             f"--set module.name={module_name} "
+            f"--set spandaModule={module_name} "
             f"--set spandaTenant={namespace.split('-')[0]} "
             f"--set spandaEnvironment={namespace.split('-')[1] if '-' in namespace else 'dev'} "
             f"--wait --timeout=300s"
@@ -800,8 +801,8 @@ async def enable_module(
             raise HTTPException(status_code=404, detail=f"Module '{module_name}' not found in definitions")
         
         # Check if module is already deployed
-        # Use environment directly as namespace since it already includes tenant context
-        namespace = environment
+        # Construct namespace from tenant and environment
+        namespace = f"{tenant_name}-{environment}"
         deployment_status = is_module_deployed(namespace, module_name)
         
         if deployment_status["deployed"]:
@@ -853,8 +854,8 @@ async def disable_module(
 ):
     """Disable/undeploy a specific module for a tenant"""
     try:
-        # Use environment directly as namespace since it already includes tenant context
-        namespace = environment
+        # Construct namespace from tenant and environment
+        namespace = f"{tenant_name}-{environment}"
         
         # Check if module is currently deployed
         deployment_status = is_module_deployed(namespace, module_name)
@@ -900,8 +901,8 @@ async def get_module_deployment_status(
 ):
     """Get the deployment status of a specific module for a tenant"""
     try:
-        # Use environment directly as namespace since it already includes tenant context
-        namespace = environment
+        # Construct namespace from tenant and environment
+        namespace = f"{tenant_name}-{environment}"
         deployment_status = is_module_deployed(namespace, module_name)
         
         return {

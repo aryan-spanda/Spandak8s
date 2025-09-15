@@ -86,6 +86,122 @@ modules:
       nessie:
         enabled: false
 
+  # Individual Data Lake Components
+  minio:
+    name: "minio"
+    display_name: "MinIO Object Storage"
+    description: "S3-compatible object storage for data lake and applications"
+    version: "1.0.0"
+    category: "data-storage"
+    dependencies: []
+    chart_path: "data-lake-baremetal"
+    default_config:
+      tenant_scope: true
+      # Only enable MinIO, disable all other components
+      minio:
+        enabled: true
+        replicas: 1
+        persistence:
+          enabled: true
+          size: 10Gi
+          storageClass: standard
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 200m
+          limits:
+            memory: 1Gi
+            cpu: 500m
+      spark:
+        enabled: false
+      dremio:
+        enabled: false
+      kafka:
+        enabled: false
+      nifi:
+        enabled: false
+      nessie:
+        enabled: false
+
+  spark:
+    name: "spark"
+    display_name: "Apache Spark"
+    description: "Distributed computing engine for big data processing"
+    version: "1.0.0"
+    category: "analytics"
+    dependencies: []
+    chart_path: "data-lake-baremetal"
+    default_config:
+      tenant_scope: true
+      # Only enable Spark, disable all other components
+      minio:
+        enabled: false
+      spark:
+        enabled: true
+        master:
+          port: 7077
+          webPort: 8080
+          host: "0.0.0.0"
+          resources:
+            requests:
+              memory: 1024Mi
+              cpu: 500m
+            limits:
+              memory: 2Gi
+              cpu: 1000m
+        worker:
+          replicas: 2
+          resources:
+            requests:
+              memory: 1024Mi
+              cpu: 500m
+            limits:
+              memory: 2Gi
+              cpu: 1000m
+      dremio:
+        enabled: false
+      kafka:
+        enabled: false
+      nifi:
+        enabled: false
+      nessie:
+        enabled: false
+
+  dremio:
+    name: "dremio"
+    display_name: "Dremio Data Lake Engine"
+    description: "Self-service data platform for analytics and data science"
+    version: "1.0.0"
+    category: "analytics"
+    dependencies: []
+    chart_path: "data-lake-baremetal"
+    default_config:
+      tenant_scope: true
+      # Only enable Dremio, disable all other components
+      minio:
+        enabled: false
+      spark:
+        enabled: false
+      dremio:
+        enabled: true
+        persistence:
+          enabled: true
+          size: 5Gi
+          storageClass: standard
+        resources:
+          requests:
+            memory: 2Gi
+            cpu: 500m
+          limits:
+            memory: 4Gi
+            cpu: 1000m
+      kafka:
+        enabled: false
+      nifi:
+        enabled: false
+      nessie:
+        enabled: false
+
   data-management-complete:
     name: "data-management-complete"
     display_name: "Complete Data Management"

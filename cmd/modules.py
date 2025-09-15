@@ -139,11 +139,16 @@ def enable_module(ctx, module_name, env, config_file):
     # if not api_client.ensure_backend_running():
     #     return
     
-    # Use default values if not specified
-    if env is None:
-        env = config.get('defaults.environment', 'dev')
-    
-    tenant_name = config.get('tenant.name', 'default')
+    # Parse tenant and environment from --env parameter
+    if env and '-' in env:
+        # Environment format: tenant-environment (e.g., langflow-dev)
+        tenant_name, parsed_env = env.split('-', 1)
+        env = parsed_env
+    else:
+        # Use default values if not specified
+        if env is None:
+            env = config.get('defaults.environment', 'dev')
+        tenant_name = config.get('tenant.name', 'default')
     
     try:
         # Check if module exists first
@@ -236,11 +241,16 @@ def disable_module(ctx, module_name, env, force):
     # if not api_client.ensure_backend_running():
     #     return
     
-    # Use default values if not specified
-    if env is None:
-        env = config.get('defaults.environment', 'dev')
-    
-    tenant_name = config.get('tenant.name', 'default')
+    # Parse tenant and environment from --env parameter
+    if env and '-' in env:
+        # Environment format: tenant-environment (e.g., langflow-dev)
+        tenant_name, parsed_env = env.split('-', 1)
+        env = parsed_env
+    else:
+        # Use default values if not specified
+        if env is None:
+            env = config.get('defaults.environment', 'dev')
+        tenant_name = config.get('tenant.name', 'default')
     
     try:
         # Check current deployment status first
@@ -293,11 +303,16 @@ def module_status(ctx, module_name, env):
     # if not api_client.ensure_backend_running():
     #     return
     
-    # Use default values if not specified
-    if env is None:
-        env = config.get('defaults.environment', 'dev')
-    
-    tenant_name = config.get('tenant.name', 'default')
+    # Parse tenant and environment from --env parameter
+    if env and '-' in env:
+        # Environment format: tenant-environment (e.g., langflow-dev)
+        tenant_name, parsed_env = env.split('-', 1)
+        env = parsed_env
+    else:
+        # Use default values if not specified
+        if env is None:
+            env = config.get('defaults.environment', 'dev')
+        tenant_name = config.get('tenant.name', 'default')
     
     try:
         with Progress(
