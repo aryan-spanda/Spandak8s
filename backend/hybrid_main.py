@@ -524,11 +524,19 @@ def is_module_deployed_via_kubectl(namespace: str, module_name: str) -> Dict[str
     try:
         # Check for StatefulSets with various label selectors
         label_selectors = [
-            f"spanda.ai/module=data-lake-baremetal",
+            "spanda.ai/module=data-lake-baremetal",
             f"spanda.ai/module={module_name}",
             f"service={module_name}",
-            f"component=data-lake"
+            "component=data-lake"
         ]
+        
+        # Add specific service labels for Spark components
+        if module_name == "spark":
+            label_selectors.extend([
+                "service=spark-master",
+                "service=spark-notebook",
+                "service=spark-worker"
+            ])
         
         statefulsets_found = []
         deployments_found = []
@@ -549,6 +557,19 @@ def is_module_deployed_via_kubectl(namespace: str, module_name: str) -> Dict[str
             
             if result.returncode == 0 and result.stdout.strip():
                 deployments_found.extend([d.split('/')[-1] for d in result.stdout.strip().split('\n') if d.strip()])
+        
+        # Special case: Check for any deployments with component=data-lake (broader search)
+        cmd = ["wsl", "bash", "-c", 
+               f"kubectl get deployments -n {namespace} -l 'component=data-lake' -o name 2>/dev/null"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        
+        if result.returncode == 0 and result.stdout.strip():
+            all_deployments = [d.split('/')[-1] for d in result.stdout.strip().split('\n') if d.strip()]
+            
+            # Filter by module name if it matches any component
+            for dep in all_deployments:
+                if module_name in dep.lower() or any(keyword in dep.lower() for keyword in [module_name, f"{module_name}-"]):
+                    deployments_found.append(dep)
         
         # Remove duplicates
         statefulsets_found = list(set(statefulsets_found))
