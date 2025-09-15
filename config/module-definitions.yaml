@@ -95,6 +95,14 @@ modules:
     category: "data-storage"
     dependencies: []
     chart_path: "data-lake-baremetal"
+    helm_values:
+      # Only enable MinIO, disable all other components
+      minio.enabled: true
+      spark.enabled: false
+      dremio.enabled: false
+      kafka.enabled: false
+      nifi.enabled: false
+      nessie.enabled: false
     default_config:
       tenant_scope: true
       # Only enable MinIO, disable all other components
@@ -131,6 +139,14 @@ modules:
     category: "analytics"
     dependencies: []
     chart_path: "data-lake-baremetal"
+    helm_values:
+      # Only enable Spark, disable all other components
+      minio.enabled: false
+      spark.enabled: true
+      dremio.enabled: false
+      kafka.enabled: false
+      nifi.enabled: false
+      nessie.enabled: false
     default_config:
       tenant_scope: true
       # Only enable Spark, disable all other components
@@ -175,6 +191,14 @@ modules:
     category: "analytics"
     dependencies: []
     chart_path: "data-lake-baremetal"
+    helm_values:
+      # Only enable Dremio, disable all other components
+      minio.enabled: false
+      spark.enabled: false
+      dremio.enabled: true
+      kafka.enabled: false
+      nifi.enabled: false
+      nessie.enabled: false
     default_config:
       tenant_scope: true
       # Only enable Dremio, disable all other components
