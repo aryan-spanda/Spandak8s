@@ -1175,9 +1175,10 @@ async def enable_module(
         if module_name not in available_modules:
             raise HTTPException(status_code=404, detail=f"Module '{module_name}' not found in definitions")
         
-        # Check if module is already deployed
-        # Construct namespace from tenant and environment
+        # All modules are now tenant-specific (cluster-wide modules managed separately by infrastructure repo)
         namespace = f"{tenant_name}-{environment}"
+        
+        # Check if module is already deployed
         deployment_status = is_module_deployed(namespace, module_name)
         
         if deployment_status["deployed"]:

@@ -317,7 +317,7 @@ modules:
     dependencies: []
     chart_path: "monitoring-prometheus"
     default_config:
-      tenant_scope: false  # Cluster-wide monitoring
+      tenant_scope: true  # Tenant-specific monitoring
       prometheus:
         enabled: true
         retention: "15d"
@@ -351,13 +351,13 @@ modules:
   security-vault:
     name: "security-vault"
     display_name: "HashiCorp Vault"
-    description: "Secrets management and encryption services"
+    description: "Secrets management and encryption services for tenant"
     version: "1.0.0"
     category: "security"
     dependencies: []
     chart_path: "security-vault"
     default_config:
-      tenant_scope: false  # Cluster-wide security
+      tenant_scope: true  # Tenant-specific security vault
       vault:
         enabled: true
         ha:
@@ -370,93 +370,6 @@ modules:
           limits:
             memory: 512Mi
             cpu: 500m
-
-  security-cert-manager:
-    name: "security-cert-manager"
-    display_name: "Certificate Manager"
-    description: "Automated TLS certificate management"
-    version: "1.0.0"
-    category: "security"
-    dependencies: []
-    chart_path: "security-cert-manager"
-    default_config:
-      tenant_scope: false  # Cluster-wide certificates
-      certManager:
-        enabled: true
-        resources:
-          requests:
-            memory: 32Mi
-            cpu: 10m
-          limits:
-            memory: 64Mi
-            cpu: 100m
-
-  # Networking
-  net-vpc-baremetal:
-    name: "net-vpc-baremetal"
-    display_name: "VPC Networking"
-    description: "Virtual private cloud networking for bare metal"
-    version: "1.0.0"
-    category: "networking"
-    dependencies: []
-    chart_path: "net-vpc-baremetal"
-    default_config:
-      tenant_scope: false  # Cluster-wide networking
-
-  net-lb-baremetal:
-    name: "net-lb-baremetal"
-    display_name: "Load Balancer"
-    description: "Layer 4 load balancing for bare metal deployments"
-    version: "1.0.0"
-    category: "networking"
-    dependencies: ["net-vpc-baremetal"]
-    chart_path: "net-lb-baremetal"
-    default_config:
-      tenant_scope: false
-
-  net-lb-app-external-baremetal:
-    name: "net-lb-app-external-baremetal"
-    display_name: "External App Load Balancer"
-    description: "Application layer load balancing for external traffic"
-    version: "1.0.0"
-    category: "networking"
-    dependencies: ["net-lb-baremetal"]
-    chart_path: "net-lb-app-external-baremetal"
-    default_config:
-      tenant_scope: false
-
-  net-lb-app-internal-baremetal:
-    name: "net-lb-app-internal-baremetal"
-    display_name: "Internal App Load Balancer"
-    description: "Application layer load balancing for internal traffic"
-    version: "1.0.0"
-    category: "networking"
-    dependencies: ["net-lb-baremetal"]
-    chart_path: "net-lb-app-internal-baremetal"
-    default_config:
-      tenant_scope: false
-
-  net-firewall-baremetal:
-    name: "net-firewall-baremetal"
-    display_name: "Firewall"
-    description: "Network security and firewall rules"
-    version: "1.0.0"
-    category: "networking"
-    dependencies: ["net-vpc-baremetal"]
-    chart_path: "net-firewall-baremetal"
-    default_config:
-      tenant_scope: false
-
-  net-address-baremetal:
-    name: "net-address-baremetal"
-    display_name: "Address Management"
-    description: "IP address allocation and management"
-    version: "1.0.0"
-    category: "networking"
-    dependencies: ["net-vpc-baremetal"]
-    chart_path: "net-address-baremetal"
-    default_config:
-      tenant_scope: false
 
 # Module Categories for filtering and organization
 categories:
@@ -480,15 +393,15 @@ categories:
     description: "Observability, monitoring, and alerting"
     icon: "📈"
   
+  monitoring:
+    name: "Monitoring"
+    description: "Observability, monitoring, and alerting"
+    icon: "📈"
+  
   security:
     name: "Security"
     description: "Security, secrets management, and compliance"
     icon: "🔒"
-  
-  networking:
-    name: "Networking"
-    description: "Network infrastructure and connectivity"
-    icon: "🌐"
 
 # Resource Template - Single unified configuration
 resource_templates:
