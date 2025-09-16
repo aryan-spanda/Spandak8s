@@ -43,7 +43,7 @@ class SpandaConfig:
         default_config = {
             'api': {
                 'base_url': 'http://localhost:8000',  # Updated for hybrid backend
-                'timeout': 30,
+                'timeout': 120,  # Increased timeout for status checks
                 'verify_ssl': True
             },
             'auth': {

@@ -231,15 +231,30 @@ def enable_module(ctx, module_name, env, config_file):
 @click.argument('module_name')
 @click.option('--env', '-e', default=None, help='Environment (dev, staging, prod)')
 @click.option('--force', '-f', is_flag=True, help='Force disable without confirmation')
+@click.option('--keep-data', is_flag=True, help='Keep PVCs and data (default: removes PVCs)')
+@click.option('--complete-cleanup', is_flag=True, help='Remove ALL resources (secrets, serviceaccounts, roles, custom resources)')
+@click.option('--dry-run', is_flag=True, help='Show what would be cleaned up without actually doing it')
 @click.pass_context
-def disable_module(ctx, module_name, env, force):
-    """Disable a platform module for your tenant"""
+def disable_module(ctx, module_name, env, force, keep_data, complete_cleanup, dry_run):
+    """
+    Disable a platform module for your tenant
+    
+    Resource cleanup options:
+    - Default: Removes deployments + PVCs (data loss!)
+    - --keep-data: Preserves PVCs and data 
+    - --complete-cleanup: Removes EVERYTHING (secrets, serviceaccounts, roles, CRDs, etc.)
+    - --dry-run: Preview cleanup without executing
+    
+    Complete cleanup includes:
+    • Secrets (except service account tokens)
+    • ServiceAccounts (except default/system)
+    • Roles and RoleBindings
+    • NetworkPolicies
+    • Ingresses  
+    • Custom Resources (Kafka, Vault, Certificates)
+    """
     config = ctx.obj['config']
     api_client = ctx.obj['api_client']
-    
-    # Ensure backend is running
-    # if not api_client.ensure_backend_running():
-    #     return
     
     # Parse tenant and environment from --env parameter
     if env and '-' in env:
@@ -251,6 +266,10 @@ def disable_module(ctx, module_name, env, force):
         if env is None:
             env = config.get('defaults.environment', 'dev')
         tenant_name = config.get('tenant.name', 'default')
+    
+    # Determine cleanup options
+    cleanup_pvcs = not keep_data  # By default we clean PVCs unless --keep-data is specified
+    cleanup_all = complete_cleanup
     
     try:
         # Check current deployment status first
@@ -264,9 +283,31 @@ def disable_module(ctx, module_name, env, force):
             # Status check failed, continue anyway
             console.print("⚠️ [yellow]Could not check deployment status, proceeding with disable...[/yellow]")
         
-        if not force:
-            console.print(f"⚠️  [yellow]This will remove '{module_name}' and all its data from '{env}' environment[/yellow]")
-            if not click.confirm(f"Are you sure you want to disable '{module_name}'?"):
+        # Show cleanup warnings with comprehensive resource list
+        if cleanup_pvcs and not keep_data:
+            console.print(f"⚠️  [red]This will DELETE ALL DATA (PVCs) for '{module_name}' in '{env}' environment[/red]")
+        if complete_cleanup:
+            console.print("⚠️  [red]Complete cleanup will remove ALL resources including:[/red]")
+            console.print("   • [red]Secrets[/red] (credentials, certificates)")
+            console.print("   • [red]ServiceAccounts[/red] (RBAC permissions)")  
+            console.print("   • [red]Roles & RoleBindings[/red] (access control)")
+            console.print("   • [red]NetworkPolicies[/red] (network security)")
+            console.print("   • [red]Ingresses[/red] (external access)")
+            console.print("   • [red]Custom Resources[/red] (Kafka topics, Vault policies, etc.)")
+        if keep_data:
+            console.print("ℹ️  [green]Data (PVCs) will be preserved[/green]")
+        
+        if dry_run:
+            console.print("🔍 [yellow]DRY RUN MODE - No resources will actually be deleted[/yellow]")
+        
+        if not force and not dry_run:
+            warning_msg = f"disable '{module_name}'"
+            if cleanup_pvcs:
+                warning_msg += " and DELETE ITS DATA"
+            if complete_cleanup:
+                warning_msg += " and ALL associated resources (secrets, RBAC, custom resources)"
+                
+            if not click.confirm(f"Are you sure you want to {warning_msg}?"):
                 console.print("❌ [yellow]Operation cancelled[/yellow]")
                 return
         
@@ -274,18 +315,51 @@ def disable_module(ctx, module_name, env, force):
         console.print(f"🏷️  Environment: [yellow]{env}[/yellow]")
         console.print(f"🏢 Namespace: [cyan]{tenant_name}-{env}[/cyan]")
         
+        # Show cleanup mode with more detail
+        cleanup_mode = "Keep Data" if keep_data else "Remove PVCs"
+        if complete_cleanup:
+            cleanup_mode += " + Complete Cleanup (Secrets, RBAC, CRDs)"
+        if dry_run:
+            cleanup_mode += " [DRY RUN]"
+        console.print(f"🧹 Cleanup Mode: [magenta]{cleanup_mode}[/magenta]")
+        
+        if dry_run:
+            console.print("📋 [dim]Would clean up the following resource types:[/dim]")
+            console.print("   • Helm release (deployments, services, configmaps)")
+            if cleanup_pvcs:
+                console.print("   • [red]PersistentVolumeClaims (DATA LOSS!)[/red]")
+            if complete_cleanup:
+                console.print("   • [yellow]Secrets (except service tokens)[/yellow]")
+                console.print("   • [yellow]ServiceAccounts (except default)[/yellow]") 
+                console.print("   • [yellow]Roles and RoleBindings[/yellow]")
+                console.print("   • [yellow]NetworkPolicies[/yellow]")
+                console.print("   • [yellow]Ingresses[/yellow]")
+                console.print("   • [yellow]Custom Resources (Kafka, Vault, Certificates)[/yellow]")
+            console.print("   • Jobs and stuck pods")
+            console.print("\n💡 [dim]Run without --dry-run to execute cleanup[/dim]")
+            return
+        
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=console
         ) as progress:
-            progress.add_task("Removing module...", total=None)
-            result = api_client.disable_module(tenant_name, env, module_name)
+            progress.add_task(
+                "Removing module and cleaning up resources..." if cleanup_pvcs or complete_cleanup else "Removing module (keeping data)...", 
+                total=None
+            )
+            result = api_client.disable_module(tenant_name, env, module_name, cleanup_pvcs, cleanup_all)
         
         console.print(f"✅ [green]Successfully disabled '{module_name}'![/green]")
         
         if 'message' in result:
             console.print(f"📄 {result['message']}")
+        
+        # Show cleanup results if available
+        if result.get('undeploy', {}).get('cleanup_performed'):
+            console.print("🧹 [dim]Cleanup performed:[/dim]")
+            for cleanup_result in result['undeploy']['cleanup_performed']:
+                console.print(f"   {cleanup_result}")
             
     except Exception as e:
         console.print(f"❌ [red]Error disabling module '{module_name}': {e}[/red]")

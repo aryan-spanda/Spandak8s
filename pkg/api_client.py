@@ -208,10 +208,24 @@ class SpandaAPIClient:
         response = self._make_request('POST', endpoint, params=params, timeout=self.timeout * 3)
         return response.json()
     
-    def disable_module(self, tenant_name: str, environment: str, module_name: str) -> Dict[str, Any]:
-        """Disable/undeploy a module for a specific tenant"""
+    def disable_module(self, tenant_name: str, environment: str, module_name: str, 
+                      cleanup_pvcs: bool = True, cleanup_all: bool = False) -> Dict[str, Any]:
+        """
+        Disable/undeploy a module for a specific tenant
+        
+        Args:
+            tenant_name: Name of the tenant
+            environment: Environment (dev, staging, prod)
+            module_name: Name of the module to disable
+            cleanup_pvcs: If True, removes PVCs (WARNING: data will be lost!)
+            cleanup_all: If True, performs complete cleanup including secrets and serviceaccounts
+        """
         endpoint = f"/api/v1/tenants/{tenant_name}/modules/{module_name}/disable"
-        params = {'environment': environment}
+        params = {
+            'environment': environment,
+            'cleanup_pvcs': cleanup_pvcs,
+            'cleanup_all': cleanup_all
+        }
         
         response = self._make_request('POST', endpoint, params=params, timeout=self.timeout * 3)
         return response.json()

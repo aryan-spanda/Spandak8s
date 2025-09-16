@@ -1,53 +1,455 @@
 # 🚀 Spandak8s CLI & Platform
 
-The complete **Spanda AI Platform** with CLI interface and hybrid backend. Provides imperative control over platform modules like MinIO, Spark, Dremio, and other data lake infrastructure components with beautiful Rich UI and real-time monitoring.
+The complete **Spanda AI Platform** CLI with hybrid backend. Provides imperative control over platform modules like MinIO, Spark, Dremio, security-vault, and data lake infrastructure with beautiful Rich UI, real-time monitoring, and advanced resource management.
 
 ## ✨ Features
 
 ### 🎯 **Platform Modules**
-- **13 Platform Modules** across 6 categories (Data Storage, Analytics, Security, etc.)
-- **3 Resource Tiers** - Bronze (10 CPU/20Gi), Standard (20 CPU/40Gi), Premium (50 CPU/100Gi)
-- **Real-time Status** - Direct Kubernetes API monitoring
-- **Module Dependencies** - Automatic validation and conflict detection
+- **Dynamic Module Management** - Security-vault, data lake components, Kafka, and more
+- **Environment-Specific Deployments** - dev, staging, prod with values overlays
+- **Tenant-Scoped Namespaces** - Dynamic namespace generation (tenant-environment)
+- **Resource Cleanup Options** - Granular control over PVC, secrets, and serviceaccount cleanup
+- **Real-time Status** - Direct Kubernetes API monitoring via WSL integration
 
 ### 🖥️ **CLI Interface**
 - **Beautiful Rich UI** with tables, progress bars, and colored output
-- **Cross-Platform** support (Windows/Linux/macOS with WSL integration)
-- **Auto-Configuration** with intelligent defaults and validation
-- **JWT Authentication** with secure token management
+- **Cross-Platform** support (Windows with WSL2 integration)
+- **Simple Commands** - `python spandak8s enable/disable module-name --env tenant-environment`
+- **Advanced Cleanup** - `--keep-data`, `--complete-cleanup` options
+- **Auto-Configuration** with intelligent defaults
 
 ### ⚡ **Hybrid Backend**
+- **No Authentication Required** - Direct API access for development
 - **YAML-based Configuration** - Module definitions from local file
-- **Real-time Monitoring** - Direct Kubernetes API queries
-- **Lightweight Architecture** - Only 6 dependencies, no database
-- **Simple Authentication** - JWT with in-memory users
+- **WSL-Kubernetes Integration** - Seamless Windows-to-WSL kubectl access
+- **Helm-based Deployments** - Environment-specific values files
+- **Dynamic Namespace Support** - Global namespace inheritance
 
-## 📦 Installation
+### 🧹 **Advanced Resource Management**
+- **Smart Cleanup** - Configurable PVC and resource removal
+- **Data Preservation** - Option to keep persistent volumes
+- **Complete Cleanup** - Remove all resources including secrets
+- **Resource Warnings** - Clear data loss warnings before destructive operations
 
-### Via Snap (Recommended for Linux)
+## 📦 Quick Start
+
+### Prerequisites
+
+1. **Windows with WSL2** (Ubuntu recommended)
+2. **Kubernetes cluster** (kind, k3s, or production cluster)
+3. **Helm 3.x** installed in WSL
+4. **kubectl** configured in WSL
+
+### Installation
 
 ```bash
-sudo snap install spandak8s
+# Clone the repository
+git clone https://github.com/aryan-spanda/Spandak8s.git
+cd Spandak8s
+
+# Set up backend environment
+cd backend
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements-hybrid.txt
+
+# Start the backend (in a separate terminal)
+python hybrid_main.py
+
+# Use the CLI (in main directory)
+python spandak8s --help
 ```
 
-### Via Python pip
+### Basic Usage
 
 ```bash
-pip install spandak8s
+# Enable a module
+python spandak8s enable security-vault --env langflow-dev
+
+# Disable a module (removes PVCs by default)
+python spandak8s disable security-vault --env langflow-dev
+
+# Disable but keep data
+python spandak8s disable security-vault --env langflow-dev --keep-data
+
+# Complete cleanup (removes everything)
+python spandak8s disable security-vault --env langflow-dev --complete-cleanup
+
+# Check module status
+python spandak8s modules status security-vault --env langflow-dev
+
+# List available modules
+python spandak8s modules list
 ```
 
-### Via Docker
+## 🏗️ Architecture
 
-```bash
-docker run --rm -it spandaai/spandak8s:latest --help
+### WSL-Integrated Hybrid Backend
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Spandak8s     │    │  Hybrid Backend  │    │   WSL Ubuntu    │
+│      CLI        │◄──►│    FastAPI       │◄──►│                 │
+│                 │    │                  │    │ • kubectl       │
+│ • Rich UI       │    │ • No Auth        │    │ • helm          │
+│ • Commands      │    │ • YAML Config    │    │ • Kind cluster  │
+│ • Cleanup Opts  │    │ • WSL kubectl    │    │ • Kubeconfig    │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                │                        │
+                                ▼                        ▼
+                       ┌──────────────────┐    ┌─────────────────┐
+                       │ Module Definitions│    │   Kubernetes    │
+                       │    YAML File      │    │    Cluster      │
+                       │                   │    │                 │
+                       │ • Security-Vault  │    │ • Dynamic       │
+                       │ • Data Lake       │    │   Namespaces    │
+                       │ • Environment     │    │ • Helm Charts   │
+                       │   Values          │    │ • Real-time     │
+                       └──────────────────┘    └─────────────────┘
 ```
 
-### From Source
+### Key Components
+
+#### **1. CLI Interface (`spandak8s` command)**
+- **Rich Terminal UI** with progress indicators and colored status
+- **Environment Parsing** - Supports `--env tenant-environment` format
+- **Resource Management** - Advanced cleanup options with clear warnings
+- **Module Commands** - enable, disable, status, list
+
+#### **2. Hybrid Backend (`backend/hybrid_main.py`)**
+- **FastAPI Server** running on localhost:8000
+- **WSL Integration** - Direct kubectl/helm execution through WSL
+- **Dynamic Namespaces** - Tenant-environment namespace generation
+- **Environment-Specific Values** - Automatic values-{env}.yaml file selection
+
+#### **3. Module Definitions (`config/module-definitions.yaml`)**
+- **Module Catalog** - Security-vault, data lake components, Kafka
+- **Helm Configuration** - Chart paths, values, and dependencies
+- **Resource Tiers** - Bronze, Standard, Premium resource allocations
+
+## 📋 Command Reference
+
+### Module Management
+
+#### Enable/Deploy Modules
 
 ```bash
-git clone https://github.com/spanda-ai/spandak8s-cli.git
-cd spandak8s-cli
+# Basic module deployment
+python spandak8s enable security-vault --env langflow-dev
+python spandak8s enable minio --env langflow-dev
+python spandak8s enable kafka --env production-prod
+
+# Alternative syntax
+python spandak8s modules enable security-vault --env langflow-dev
+```
+
+#### Disable/Undeploy Modules
+
+```bash
+# Default: Remove module and PVCs (saves resources, data loss!)
+python spandak8s disable security-vault --env langflow-dev
+
+# Keep persistent data (preserves PVCs)
+python spandak8s disable security-vault --env langflow-dev --keep-data
+
+# Complete cleanup (removes ALL resources including secrets, RBAC, custom resources)
+python spandak8s disable security-vault --env langflow-dev --complete-cleanup
+
+# Keep data but cleanup other resources
+python spandak8s disable security-vault --env langflow-dev --keep-data --complete-cleanup
+
+# Preview what would be cleaned up (dry run)
+python spandak8s disable security-vault --env langflow-dev --dry-run
+
+# Force disable without confirmation
+python spandak8s disable security-vault --env langflow-dev --force
+```
+
+### Comprehensive Resource Cleanup Matrix
+
+| Option | Helm Resources | PVCs (Data) | Secrets | ServiceAccounts | RBAC (Roles) | NetworkPolicies | Ingresses | Custom Resources |
+|--------|----------------|-------------|---------|-----------------|--------------|-----------------|-----------|------------------|
+| **Default** | ❌ Removed | ❌ **DELETED** | ✅ Kept | ✅ Kept | ✅ Kept | ✅ Kept | ✅ Kept | ✅ Kept |
+| **--keep-data** | ❌ Removed | ✅ **Preserved** | ✅ Kept | ✅ Kept | ✅ Kept | ✅ Kept | ✅ Kept | ✅ Kept |
+| **--complete-cleanup** | ❌ Removed | ❌ **DELETED** | ❌ **DELETED** | ❌ **DELETED** | ❌ **DELETED** | ❌ **DELETED** | ❌ **DELETED** | ❌ **DELETED** |
+
+### Custom Resources Cleaned Up
+
+When using `--complete-cleanup`, the following Custom Resource Definitions (CRDs) are automatically cleaned:
+
+- **Kafka Resources** (`kafkas.kafka.strimzi.io`, `kafkatopics.kafka.strimzi.io`, `kafkausers.kafka.strimzi.io`)
+- **Vault Resources** (`vaults.vault.security.coreos.com`, `vaultpolicies.vault.security.coreos.com`)
+- **Certificate Management** (`certificates.cert-manager.io`, `issuers.cert-manager.io`)
+- **Module-Specific CRDs** (based on module patterns)
+
+#### Status and Information
+
+```bash
+# Check specific module status
+python spandak8s modules status security-vault --env langflow-dev
+
+# List all available modules
+python spandak8s modules list
+
+# Check platform status
+python spandak8s status
+
+# Check cluster connectivity
+python spandak8s status cluster
+```
+
+### Environment Variables and Configuration
+
+```bash
+# Backend configuration
+export SPANDA_API_BASE_URL="http://localhost:8000"
+export SPANDA_DEFAULT_TENANT="langflow"
+export SPANDA_DEFAULT_ENVIRONMENT="dev"
+
+# WSL paths (automatically handled)
+# Windows: C:\Users\...\spandaai-platform-deployment
+# WSL: /mnt/c/Users/.../spandaai-platform-deployment
+```
+
+## 🔧 Development Setup
+
+### Backend Development
+
+```bash
+cd backend
+
+# Create virtual environment
+python -m venv venv
+venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements-hybrid.txt
+
+# Start development server
+python hybrid_main.py
+
+# Check health
+curl http://localhost:8000/health
+```
+
+### CLI Development
+
+```bash
+# Install in development mode
 pip install -e .
+
+# Test CLI commands
+python spandak8s --help
+python spandak8s modules list
+
+# Debug mode
+python spandak8s --debug modules enable security-vault --env langflow-dev
+```
+
+### WSL Setup Verification
+
+```bash
+# Check WSL kubectl access
+wsl -e bash -c "kubectl get nodes"
+
+# Check WSL helm installation
+wsl -e bash -c "helm version"
+
+# Verify kubeconfig
+wsl -e bash -c "kubectl config current-context"
+```
+
+## 🎯 Module Catalog
+
+### Security Modules
+- **security-vault** - HashiCorp Vault with keyholding and primary vault architecture
+  - Dynamic namespace deployment
+  - Environment-specific configurations (values-dev.yaml, values-prod.yaml)
+  - Two-vault architecture with transit seal
+
+### Data Lake Modules
+- **minio** - S3-compatible object storage
+- **spark** - Distributed data processing
+- **dremio** - Data lake analytics platform
+- **kafka** - Event streaming platform
+
+### Resource Tiers
+- **Bronze** - 10 CPU, 20Gi Memory, 100Gi Storage
+- **Standard** - 20 CPU, 40Gi Memory, 500Gi Storage  
+- **Premium** - 50 CPU, 100Gi Memory, 2Ti Storage
+
+## 🚨 Important Notes
+
+### Data Loss Warnings
+
+⚠️ **Default disable behavior has changed** - By default, `spandak8s disable` now removes PVCs to save resources. This **WILL DELETE YOUR DATA**!
+
+- Use `--keep-data` to preserve persistent volumes
+- Always backup important data before disabling modules
+- Test with non-production environments first
+
+### Resource Management
+
+- **PVCs consume disk space** - Clean them up when not needed
+- **Secrets may contain credentials** - Use `--complete-cleanup` carefully
+- **ServiceAccounts affect RBAC** - Review permissions before cleanup
+
+### Namespace Strategy
+
+- **Dynamic Namespaces** - Format: `{tenant}-{environment}` (e.g., `langflow-dev`)
+- **Environment Isolation** - Each tenant-environment gets its own namespace
+- **Global Values** - Namespaces are set dynamically via Helm `--set global.namespace=`
+
+## 🔍 API Reference
+
+### REST Endpoints
+
+```bash
+# Health check
+GET http://localhost:8000/health
+
+# List modules
+GET http://localhost:8000/api/v1/modules
+
+# Enable module
+POST http://localhost:8000/api/v1/tenants/{tenant}/modules/{module}/enable
+Query: environment=dev&tier=bronze
+
+# Disable module with cleanup options
+POST http://localhost:8000/api/v1/tenants/{tenant}/modules/{module}/disable  
+Query: environment=dev&cleanup_pvcs=true&cleanup_all=false
+
+# Module status
+GET http://localhost:8000/api/v1/tenants/{tenant}/modules/{module}/status
+Query: environment=dev
+```
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+**Backend connection failed:**
+```bash
+# Check if backend is running
+curl http://localhost:8000/health
+
+# Check backend logs
+cd backend
+python hybrid_main.py
+```
+
+**WSL kubectl access failed:**
+```bash
+# Test WSL connectivity
+wsl -e bash -c "kubectl get nodes"
+
+# Check kubeconfig
+wsl -e bash -c "echo $KUBECONFIG"
+
+# Verify kubeconfig content
+wsl -e bash -c "kubectl config view"
+```
+
+**Module deployment failed:**
+```bash
+# Check Helm charts exist
+ls "../spandaai-platform-deployment/bare-metal/modules/"
+
+# Check namespace
+wsl -e bash -c "kubectl get ns langflow-dev"
+
+# Check Helm releases
+wsl -e bash -c "helm list -n langflow-dev"
+```
+
+**Permission denied:**
+```bash
+# Check current directory
+pwd
+
+# Verify Python environment
+which python
+python --version
+
+# Check backend virtual environment
+cd backend
+venv\Scripts\activate
+```
+
+### Debug Mode
+
+Enable detailed logging:
+
+```bash
+# CLI debug
+python spandak8s --debug modules enable security-vault --env langflow-dev
+
+# Backend debug (in backend/hybrid_main.py)
+# Set logging.basicConfig(level=logging.DEBUG)
+```
+
+### Health Checks
+
+```bash
+# Check all components
+curl http://localhost:8000/health
+
+# Test WSL integration
+curl http://localhost:8000/api/v1/debug/k8s
+
+# Check platform status
+curl http://localhost:8000/api/v1/platform/status
+```
+
+## 📁 Project Structure
+
+```
+Spandak8s/
+├── README.md                    # This comprehensive guide
+├── spandak8s                    # Main CLI entry point
+├── spandak8s-original           # Original CLI implementation
+├── backend/
+│   ├── hybrid_main.py          # FastAPI backend with WSL integration
+│   ├── venv/                   # Backend virtual environment
+│   └── requirements-hybrid.txt # Backend dependencies
+├── cmd/
+│   ├── modules.py              # Module management commands
+│   ├── tenants.py              # Tenant commands  
+│   └── status.py               # Status commands
+├── pkg/
+│   ├── api_client.py           # API client with cleanup options
+│   └── config.py               # Configuration management
+└── config/
+    └── module-definitions.yaml # Module catalog and configuration
+```
+
+## 🤝 Contributing
+
+We welcome contributions! Key areas:
+
+- **New Modules** - Add module definitions and Helm charts
+- **Environment Support** - Additional environment-specific configurations  
+- **Resource Management** - Enhanced cleanup and monitoring
+- **WSL Integration** - Improved cross-platform support
+
+Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 📞 Support
+
+- 📖 Documentation: https://docs.spanda.ai
+- 💬 Community: https://community.spanda.ai  
+- 🐛 Issues: https://github.com/aryan-spanda/Spandak8s/issues
+- 📧 Email: support@spanda.ai
+
+---
+
+**⚡ Quick Start**: `python spandak8s enable security-vault --env langflow-dev`
+
+**⚠️ Data Safety**: Use `--keep-data` when disabling modules to preserve persistent volumes!
 ```
 
 ### Windows Setup

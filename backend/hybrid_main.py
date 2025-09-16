@@ -169,32 +169,96 @@ class HealthResponse(BaseModel):
 def get_deployed_modules(namespace: str) -> List[Dict[str, Any]]:
     """Get list of deployed modules in a namespace with their status"""
     try:
-        deployments = k8s_apps.list_namespaced_deployment(namespace=namespace)
         modules = []
         
+        # Check Deployments
+        deployments = k8s_apps.list_namespaced_deployment(namespace=namespace)
         for deployment in deployments.items:
             labels = deployment.metadata.labels or {}
+            module_name = None
+            
+            # Check for spanda module labels first
             if "spanda.ai/module" in labels:
+                module_name = labels.get("spanda.ai/module")
+            elif "spandaModule" in labels:
+                module_name = labels.get("spandaModule")
+            elif "app.kubernetes.io/name" in labels:
+                # For standard Helm charts, use app name
+                app_name = labels.get("app.kubernetes.io/name")
+                instance_name = labels.get("app.kubernetes.io/instance", "")
+                # Map common app names to module names
+                if app_name in ["vault", "security-vault", "keyholding", "primary"]:
+                    module_name = "security-vault"
+                elif app_name in ["monitoring", "prometheus"]:
+                    module_name = "monitoring"
+                elif "security-vault" in instance_name:
+                    module_name = "security-vault"
+                elif "monitoring" in instance_name:
+                    module_name = "monitoring"
+                else:
+                    module_name = app_name
+            
+            if module_name:
+                ready_replicas = deployment.status.ready_replicas or 0
+                total_replicas = deployment.status.replicas or 0
+                status = "running" if ready_replicas > 0 and ready_replicas == total_replicas else "failed" if ready_replicas == 0 else "pending"
+                
                 modules.append({
-                    "name": labels.get("spanda.ai/module", "unknown"),
+                    "name": module_name,
                     "type": "deployment",
-                    "status": "running" if deployment.status.ready_replicas else "pending",
-                    "replicas": deployment.status.replicas or 0,
-                    "ready_replicas": deployment.status.ready_replicas or 0
+                    "status": status,
+                    "replicas": total_replicas,
+                    "ready_replicas": ready_replicas
                 })
         
-        # Also check StatefulSets
+        # Check StatefulSets
         statefulsets = k8s_apps.list_namespaced_stateful_set(namespace=namespace)
         for sts in statefulsets.items:
             labels = sts.metadata.labels or {}
+            module_name = None
+            
+            # Check for spanda module labels first
             if "spanda.ai/module" in labels:
-                modules.append({
-                    "name": labels.get("spanda.ai/module", "unknown"),
-                    "type": "statefulset",
-                    "status": "running" if sts.status.ready_replicas else "pending",
-                    "replicas": sts.status.replicas or 0,
-                    "ready_replicas": sts.status.ready_replicas or 0
-                })
+                module_name = labels.get("spanda.ai/module")
+            elif "spandaModule" in labels:
+                module_name = labels.get("spandaModule")
+            elif "app.kubernetes.io/name" in labels:
+                # For standard Helm charts, use app name
+                app_name = labels.get("app.kubernetes.io/name")
+                instance_name = labels.get("app.kubernetes.io/instance", "")
+                # Map common app names to module names
+                if app_name in ["vault", "security-vault", "keyholding", "primary"]:
+                    module_name = "security-vault"
+                elif app_name in ["monitoring", "prometheus"]:
+                    module_name = "monitoring"
+                elif "security-vault" in instance_name:
+                    module_name = "security-vault"
+                elif "monitoring" in instance_name:
+                    module_name = "monitoring"
+                else:
+                    module_name = app_name
+            
+            if module_name:
+                ready_replicas = sts.status.ready_replicas or 0
+                total_replicas = sts.status.replicas or 0
+                status = "running" if ready_replicas > 0 and ready_replicas == total_replicas else "failed" if ready_replicas == 0 else "pending"
+                
+                # Check if we already have this module from deployments
+                existing_module = next((m for m in modules if m["name"] == module_name), None)
+                if existing_module:
+                    # Combine status - if either is running, mark as running
+                    if existing_module["status"] == "running" or status == "running":
+                        existing_module["status"] = "running"
+                    existing_module["replicas"] += total_replicas
+                    existing_module["ready_replicas"] += ready_replicas
+                else:
+                    modules.append({
+                        "name": module_name,
+                        "type": "statefulset",
+                        "status": status,
+                        "replicas": total_replicas,
+                        "ready_replicas": ready_replicas
+                    })
                 
         return modules
         
@@ -538,6 +602,16 @@ def is_module_deployed_via_kubectl(namespace: str, module_name: str) -> Dict[str
                 "service=spark-worker"
             ])
         
+        # Add specific Helm instance labels for security-vault
+        if module_name == "security-vault":
+            # Construct expected Helm instance name based on namespace
+            tenant_env = namespace  # namespace is already tenant-environment format
+            expected_helm_instance = f"{tenant_env}-{module_name}"
+            label_selectors.extend([
+                f"app.kubernetes.io/instance={expected_helm_instance}",
+                "app.kubernetes.io/component=vault-server"  # Use specific component label instead of app name
+            ])
+        
         statefulsets_found = []
         deployments_found = []
         
@@ -545,7 +619,7 @@ def is_module_deployed_via_kubectl(namespace: str, module_name: str) -> Dict[str
             # Check StatefulSets
             cmd = ["wsl", "bash", "-c", 
                    f"kubectl get statefulsets -n {namespace} -l '{label_selector}' -o name 2>/dev/null"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)  # Reduced timeout
             
             if result.returncode == 0 and result.stdout.strip():
                 statefulsets_found.extend([s.split('/')[-1] for s in result.stdout.strip().split('\n') if s.strip()])
@@ -553,7 +627,7 @@ def is_module_deployed_via_kubectl(namespace: str, module_name: str) -> Dict[str
             # Check Deployments
             cmd = ["wsl", "bash", "-c", 
                    f"kubectl get deployments -n {namespace} -l '{label_selector}' -o name 2>/dev/null"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)  # Reduced timeout
             
             if result.returncode == 0 and result.stdout.strip():
                 deployments_found.extend([d.split('/')[-1] for d in result.stdout.strip().split('\n') if d.strip()])
@@ -571,33 +645,78 @@ def is_module_deployed_via_kubectl(namespace: str, module_name: str) -> Dict[str
                 if module_name in dep.lower() or any(keyword in dep.lower() for keyword in [module_name, f"{module_name}-"]):
                     deployments_found.append(dep)
         
-        # Remove duplicates
+        # Remove duplicates and filter out non-vault StatefulSets for security-vault module
         statefulsets_found = list(set(statefulsets_found))
         deployments_found = list(set(deployments_found))
+        
+        # For security-vault, only keep vault-related StatefulSets
+        if module_name == "security-vault":
+            statefulsets_found = [sts for sts in statefulsets_found if 'vault' in sts.lower()]
         
         is_deployed = len(statefulsets_found) > 0 or len(deployments_found) > 0
         
         if is_deployed:
-            # Get replica status for found resources
+            # Get replica status for found resources in a single command
             total_replicas = 0
             ready_replicas = 0
             
-            for sts in statefulsets_found:
+            # Use the working custom-columns approach since .status.readyReplicas is available
+            if statefulsets_found:
+                sts_names = " ".join(statefulsets_found)
                 cmd = ["wsl", "bash", "-c", 
-                       f"kubectl get statefulset {sts} -n {namespace} -o jsonpath='{{.status.replicas}}|{{.status.readyReplicas}}' 2>/dev/null"]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                       f"kubectl get statefulset {sts_names} -n {namespace} --no-headers -o custom-columns='READY:.status.readyReplicas,DESIRED:.spec.replicas' 2>/dev/null"]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
                 
                 if result.returncode == 0 and result.stdout.strip():
                     try:
-                        replicas, ready = result.stdout.strip().split('|')
-                        total_replicas += int(replicas) if replicas else 0
-                        ready_replicas += int(ready) if ready else 0
-                    except:
+                        for line in result.stdout.strip().split('\n'):
+                            if line.strip():
+                                parts = line.strip().split()
+                                if len(parts) >= 2:
+                                    ready = int(parts[0]) if parts[0].isdigit() else 0
+                                    desired = int(parts[1]) if parts[1].isdigit() else 0
+                                    total_replicas += desired
+                                    ready_replicas += ready
+                    except Exception as e:
+                        logger.error(f"Error parsing StatefulSet status: {e}")
                         pass
             
-            status = "running" if ready_replicas > 0 else "failed"
-            if 0 < ready_replicas < total_replicas:
-                status = "degraded"
+            if deployments_found:
+                dep_names = " ".join(deployments_found)
+                cmd = ["wsl", "bash", "-c", 
+                       f"kubectl get deployment {dep_names} -n {namespace} --no-headers -o custom-columns='READY:.status.readyReplicas,DESIRED:.spec.replicas' 2>/dev/null"]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                
+                if result.returncode == 0 and result.stdout.strip():
+                    try:
+                        for line in result.stdout.strip().split('\n'):
+                            if line.strip():
+                                parts = line.strip().split()
+                                if len(parts) >= 2:
+                                    ready = int(parts[0]) if parts[0].isdigit() else 0
+                                    desired = int(parts[1]) if parts[1].isdigit() else 0
+                                    total_replicas += desired
+                                    ready_replicas += ready
+                    except Exception:
+                        pass
+            
+            # Determine status with a more reliable approach for StatefulSets
+            if module_name == "security-vault" and statefulsets_found:
+                # For Vault, if both StatefulSets exist and total_replicas > 0, check if all are ready
+                if total_replicas > 0 and ready_replicas >= total_replicas:
+                    status = "running"
+                elif ready_replicas == 0:
+                    status = "failed" 
+                else:
+                    status = "degraded"
+            else:
+                # General logic for other modules
+                if ready_replicas == 0:
+                    status = "failed"
+                elif ready_replicas == total_replicas:
+                    status = "running"
+                else:
+                    status = "degraded"
                 
             return {
                 "deployed": True,
@@ -643,7 +762,8 @@ def is_module_deployed(namespace: str, module_name: str) -> Dict[str, Any]:
         module_label_mapping = {
             "minio": ["data-lake-baremetal", "minio"],
             "spark": ["data-lake-baremetal", "spark"], 
-            "dremio": ["data-lake-baremetal", "dremio"]
+            "dremio": ["data-lake-baremetal", "dremio"],
+            "security-vault": ["security-vault", "keyholding", "primary", "vault"]
         }
         
         # Get possible module labels to check
@@ -733,7 +853,7 @@ def is_module_deployed(namespace: str, module_name: str) -> Dict[str, Any]:
             "error": str(e)
         }
 
-def deploy_module_with_helm(module_name: str, namespace: str, tenant_tier: str = "bronze") -> Dict[str, Any]:
+def deploy_module_with_helm(module_name: str, namespace: str, environment: str = "dev", tenant_tier: str = "bronze") -> Dict[str, Any]:
     """Deploy a module using Helm"""
     import subprocess
     
@@ -744,8 +864,9 @@ def deploy_module_with_helm(module_name: str, namespace: str, tenant_tier: str =
         if not helm_path.exists():
             raise HTTPException(status_code=400, detail=f"Helm charts not found for module '{module_name}'")
         
-        # Use default values file
-        values_file = helm_path / "values.yaml"
+        # Use environment-specific values file if it exists, otherwise default
+        env_values_file = helm_path / f"values-{environment}.yaml"
+        values_file = env_values_file if env_values_file.exists() else helm_path / "values.yaml"
         
         # Create release name
         release_name = f"{namespace}-{module_name}"
@@ -771,6 +892,8 @@ def deploy_module_with_helm(module_name: str, namespace: str, tenant_tier: str =
             f"--values {wsl_values_file_escaped}",
             f"--set global.namespace={namespace}",
             f"--set namespace={namespace}",
+            f"--set keyholding.namespace={namespace}",
+            f"--set primary.namespace={namespace}",
             f"--set tenant.name={namespace}",
             f"--set tenant.tier={tenant_tier}",
             f"--set module.name={module_name}",
@@ -839,14 +962,23 @@ def deploy_module_with_helm(module_name: str, namespace: str, tenant_tier: str =
         logger.error(f"Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Deployment failed: {str(e)}")
 
-def undeploy_module_with_helm(module_name: str, namespace: str) -> Dict[str, Any]:
-    """Undeploy a module using Helm"""
+def undeploy_module_with_helm(module_name: str, namespace: str, cleanup_pvcs: bool = True, cleanup_all: bool = False) -> Dict[str, Any]:
+    """
+    Undeploy a module using Helm with optional resource cleanup
+    
+    Args:
+        module_name: Name of the module to undeploy
+        namespace: Kubernetes namespace
+        cleanup_pvcs: If True, removes PVCs (data will be lost!)
+        cleanup_all: If True, removes all resources including secrets and serviceaccounts
+    """
     import subprocess
     
     try:
         release_name = f"{namespace}-{module_name}"
+        cleanup_results = []
         
-        # Build helm uninstall command for WSL
+        # 1. First, run helm uninstall
         helm_cmd = [
             "wsl", "bash", "-c",
             f"helm uninstall {release_name} --namespace {namespace} --timeout=300s"
@@ -854,7 +986,6 @@ def undeploy_module_with_helm(module_name: str, namespace: str) -> Dict[str, Any
         
         logger.info(f"Undeploying module {module_name} from {namespace} with WSL command: {' '.join(helm_cmd)}")
         
-        # Execute helm command via WSL
         result = subprocess.run(
             helm_cmd,
             capture_output=True,
@@ -862,20 +993,164 @@ def undeploy_module_with_helm(module_name: str, namespace: str) -> Dict[str, Any
             timeout=300
         )
         
-        if result.returncode == 0:
-            return {
-                "success": True,
-                "release_name": release_name,
-                "namespace": namespace,
-                "output": result.stdout,
-                "deployment_method": "helm"
-            }
-        else:
+        if result.returncode != 0:
             logger.error(f"Helm uninstall failed: {result.stderr}")
             raise HTTPException(
                 status_code=500, 
                 detail=f"Module undeployment failed: {result.stderr}"
             )
+        
+        cleanup_results.append(f"✅ Helm release '{release_name}' uninstalled")
+        
+        # 2. Optional: Clean up PVCs (this will DELETE DATA!)
+        if cleanup_pvcs:
+            logger.info(f"Cleaning up PVCs for module {module_name} in namespace {namespace}")
+            
+            # List and delete PVCs related to this module
+            pvc_cleanup_cmd = [
+                "wsl", "bash", "-c", 
+                f"kubectl get pvc -n {namespace} -o name | grep -E '({module_name}|vault|minio|dremio|spark|kafka)' | xargs -r kubectl delete -n {namespace} --ignore-not-found=true"
+            ]
+            
+            try:
+                pvc_result = subprocess.run(pvc_cleanup_cmd, capture_output=True, text=True, timeout=60)
+                if pvc_result.stdout.strip():
+                    cleanup_results.append(f"🗑️ Cleaned up PVCs: {pvc_result.stdout.strip()}")
+                else:
+                    cleanup_results.append("ℹ️ No PVCs found to clean up")
+            except Exception as e:
+                cleanup_results.append(f"⚠️ PVC cleanup warning: {e}")
+        
+        # 3. Optional: Clean up other persistent resources
+        if cleanup_all:
+            logger.info(f"Performing complete cleanup for module {module_name} in namespace {namespace}")
+            
+            # Module-specific resource patterns
+            module_patterns = f"({module_name}|vault|minio|dremio|spark|kafka)"
+            
+            # 3.1. Clean up secrets (except default service account tokens and TLS secrets)
+            secret_cleanup_cmd = [
+                "wsl", "bash", "-c",
+                f"kubectl get secret -n {namespace} -o name | grep -E '{module_patterns}' | grep -v -E '(default-token|kubernetes\\.io/service-account-token)' | xargs -r kubectl delete -n {namespace} --ignore-not-found=true"
+            ]
+            
+            # 3.2. Clean up configmaps (including Helm-managed ones)
+            cm_cleanup_cmd = [
+                "wsl", "bash", "-c",
+                f"kubectl get configmap -n {namespace} -o name | grep -E '{module_patterns}' | xargs -r kubectl delete -n {namespace} --ignore-not-found=true"
+            ]
+            
+            # 3.3. Clean up service accounts (except default and system accounts)
+            sa_cleanup_cmd = [
+                "wsl", "bash", "-c",
+                f"kubectl get serviceaccount -n {namespace} -o name | grep -E '{module_patterns}' | grep -v -E '(default|system)' | xargs -r kubectl delete -n {namespace} --ignore-not-found=true"
+            ]
+            
+            # 3.4. Clean up roles and rolebindings
+            role_cleanup_cmd = [
+                "wsl", "bash", "-c",
+                f"kubectl get role -n {namespace} -o name | grep -E '{module_patterns}' | xargs -r kubectl delete -n {namespace} --ignore-not-found=true"
+            ]
+            
+            rb_cleanup_cmd = [
+                "wsl", "bash", "-c",
+                f"kubectl get rolebinding -n {namespace} -o name | grep -E '{module_patterns}' | xargs -r kubectl delete -n {namespace} --ignore-not-found=true"
+            ]
+            
+            # 3.5. Clean up network policies
+            netpol_cleanup_cmd = [
+                "wsl", "bash", "-c",
+                f"kubectl get networkpolicy -n {namespace} -o name | grep -E '{module_patterns}' | xargs -r kubectl delete -n {namespace} --ignore-not-found=true"
+            ]
+            
+            # 3.6. Clean up ingresses
+            ingress_cleanup_cmd = [
+                "wsl", "bash", "-c",
+                f"kubectl get ingress -n {namespace} -o name | grep -E '{module_patterns}' | xargs -r kubectl delete -n {namespace} --ignore-not-found=true"
+            ]
+            
+            # 3.7. Clean up persistent volume claims (if not already cleaned)
+            if not cleanup_pvcs:
+                pvc_complete_cleanup_cmd = [
+                    "wsl", "bash", "-c",
+                    f"kubectl get pvc -n {namespace} -o name | grep -E '{module_patterns}' | xargs -r kubectl delete -n {namespace} --ignore-not-found=true"
+                ]
+            
+            # 3.8. Clean up custom resources (for modules like Kafka, Vault Operator, etc.)
+            # First, get list of custom resources that might be related
+            cr_cleanup_cmds = []
+            common_crds = [
+                "kafkas.kafka.strimzi.io",
+                "kafkatopics.kafka.strimzi.io", 
+                "kafkausers.kafka.strimzi.io",
+                "vaults.vault.security.coreos.com",
+                "vaultpolicies.vault.security.coreos.com",
+                "certificates.cert-manager.io",
+                "issuers.cert-manager.io"
+            ]
+            
+            for crd in common_crds:
+                cr_cleanup_cmds.append([
+                    "wsl", "bash", "-c",
+                    f"kubectl get {crd} -n {namespace} -o name 2>/dev/null | grep -E '{module_patterns}' | xargs -r kubectl delete -n {namespace} --ignore-not-found=true"
+                ])
+            
+            # Execute all cleanup commands
+            cleanup_tasks = [
+                (secret_cleanup_cmd, "secrets"),
+                (cm_cleanup_cmd, "configmaps"), 
+                (sa_cleanup_cmd, "serviceaccounts"),
+                (role_cleanup_cmd, "roles"),
+                (rb_cleanup_cmd, "rolebindings"),
+                (netpol_cleanup_cmd, "networkpolicies"),
+                (ingress_cleanup_cmd, "ingresses")
+            ]
+            
+            if not cleanup_pvcs:
+                cleanup_tasks.append((pvc_complete_cleanup_cmd, "pvcs"))
+                
+            for cmd, resource_type in cleanup_tasks:
+                try:
+                    cleanup_result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                    if cleanup_result.stdout.strip():
+                        cleanup_results.append(f"🧹 Cleaned up {resource_type}: {cleanup_result.stdout.strip()}")
+                    else:
+                        cleanup_results.append(f"ℹ️ No {resource_type} found to clean up")
+                except Exception as e:
+                    cleanup_results.append(f"⚠️ {resource_type} cleanup warning: {e}")
+            
+            # Clean up custom resources
+            for cr_cmd in cr_cleanup_cmds:
+                try:
+                    cr_result = subprocess.run(cr_cmd, capture_output=True, text=True, timeout=30)
+                    if cr_result.stdout.strip():
+                        resource_name = cr_cmd[2].split()[2]  # Extract CRD name
+                        cleanup_results.append(f"🔧 Cleaned up custom resources ({resource_name}): {cr_result.stdout.strip()}")
+                except Exception:
+                    pass  # Custom resource cleanup is optional
+        
+        # 4. Clean up any remaining jobs or pods that might be stuck
+        job_cleanup_cmd = [
+            "wsl", "bash", "-c",
+            f"kubectl delete job -n {namespace} -l 'app.kubernetes.io/instance={release_name}' --ignore-not-found=true"
+        ]
+        
+        try:
+            subprocess.run(job_cleanup_cmd, capture_output=True, text=True, timeout=30)
+            cleanup_results.append("🔧 Cleaned up any remaining jobs")
+        except Exception:
+            pass  # Jobs cleanup is optional
+        
+        return {
+            "success": True,
+            "release_name": release_name,
+            "namespace": namespace,
+            "output": result.stdout,
+            "deployment_method": "helm",
+            "cleanup_performed": cleanup_results,
+            "pvcs_cleaned": cleanup_pvcs,
+            "complete_cleanup": cleanup_all
+        }
             
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=408, detail="Module undeployment timed out")
@@ -920,7 +1195,7 @@ async def enable_module(
         # Deploy the module
         logger.info(f"Deploying module {module_name} for tenant {tenant_name} in {environment} environment")
         
-        deployment_result = deploy_module_with_helm(module_name, namespace, tier)
+        deployment_result = deploy_module_with_helm(module_name, namespace, environment, tier)
         
         # Wait a moment and check final status
         import time
@@ -947,9 +1222,20 @@ async def enable_module(
 async def disable_module(
     tenant_name: str, 
     module_name: str,
-    environment: str = "dev"
+    environment: str = "dev",
+    cleanup_pvcs: bool = True,
+    cleanup_all: bool = False
 ):
-    """Disable/undeploy a specific module for a tenant"""
+    """
+    Disable/undeploy a specific module for a tenant
+    
+    Args:
+        tenant_name: Name of the tenant
+        module_name: Name of the module to disable
+        environment: Environment (dev, staging, prod)
+        cleanup_pvcs: If True, removes PVCs (WARNING: data will be lost!)
+        cleanup_all: If True, performs complete cleanup including secrets and serviceaccounts
+    """
     try:
         # Construct namespace from tenant and environment
         namespace = f"{tenant_name}-{environment}"
@@ -964,10 +1250,17 @@ async def disable_module(
                 "namespace": namespace
             }
         
-        # Undeploy the module
-        logger.info(f"Undeploying module {module_name} for tenant {tenant_name} in {environment} environment")
+        # Show what will be cleaned up
+        cleanup_warning = []
+        if cleanup_pvcs:
+            cleanup_warning.append("⚠️ PVCs will be deleted (data loss!)")
+        if cleanup_all:
+            cleanup_warning.append("⚠️ All resources (secrets, serviceaccounts, etc.) will be deleted")
         
-        undeploy_result = undeploy_module_with_helm(module_name, namespace)
+        # Undeploy the module with cleanup options
+        logger.info(f"Undeploying module {module_name} for tenant {tenant_name} in {environment} environment (cleanup_pvcs={cleanup_pvcs}, cleanup_all={cleanup_all})")
+        
+        undeploy_result = undeploy_module_with_helm(module_name, namespace, cleanup_pvcs, cleanup_all)
         
         # Wait a moment and check final status
         import time
@@ -982,7 +1275,9 @@ async def disable_module(
             "status": final_status,
             "namespace": namespace,
             "tenant": tenant_name,
-            "environment": environment
+            "environment": environment,
+            "cleanup_warnings": cleanup_warning,
+            "resource_cleanup_performed": cleanup_pvcs or cleanup_all
         }
         
     except Exception as e:
