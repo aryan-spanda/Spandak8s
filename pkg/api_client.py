@@ -79,7 +79,7 @@ class SpandaAPIClient:
         console.print("🚀 [cyan]To start the backend:[/cyan]")
         console.print("   1. Open PowerShell in the backend directory")
         console.print("   2. Run: [yellow].\\.\\venv\\Scripts\\Activate.ps1[/yellow]")
-        console.print("   3. Run: [yellow]python -m uvicorn hybrid_main:app --reload --host 0.0.0.0 --port 8000[/yellow]")
+        console.print("   3. Run: [yellow]python -m uvicorn hybrid_main:app --reload --host 0.0.0.0 --port 8001[/yellow]")
         console.print()
         console.print("💡 [dim]Or use the simple script: .\\start-simple.ps1[/dim]")
         console.print()
@@ -159,10 +159,14 @@ class SpandaAPIClient:
         response = self._make_request('GET', endpoint)
         return response.json().get('tenants', [])
     
-    def get_tenant_status(self, tenant_name: str) -> Dict[str, Any]:
+    def get_tenant_status(self, tenant_name: str, environment: str = None) -> Dict[str, Any]:
         """Get real-time status of a tenant from Kubernetes"""
         endpoint = f"/api/v1/tenants/{tenant_name}/status"
-        response = self._make_request('GET', endpoint)
+        params = {}
+        if environment:
+            params['environment'] = environment
+            
+        response = self._make_request('GET', endpoint, params=params)
         return response.json()
     
     def generate_tenant_config(self, tenant_name: str, modules: List[str], 

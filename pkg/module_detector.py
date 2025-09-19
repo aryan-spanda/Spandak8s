@@ -76,6 +76,11 @@ MODULE_PATTERNS = {
         "labels": ["app=grafana", "app.kubernetes.io/name=grafana"],
         "services": ["grafana"],
         "check_status": "deployment.apps/grafana"
+    },
+    "monitoring-prometheus": {
+        "labels": ["app.kubernetes.io/part-of=kube-prometheus-stack", "app.kubernetes.io/instance=*monitoring-prometheus"],
+        "services": ["prometheus", "grafana", "alertmanager"],
+        "check_status": "deployment.apps/"
     }
 }
 

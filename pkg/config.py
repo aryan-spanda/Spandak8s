@@ -42,7 +42,7 @@ class SpandaConfig:
         """Create default configuration"""
         default_config = {
             'api': {
-                'base_url': 'http://localhost:8000',  # Updated for hybrid backend
+                'base_url': 'http://localhost:8001',  # Updated for hybrid backend
                 'timeout': 120,  # Increased timeout for status checks
                 'verify_ssl': True
             },
@@ -113,7 +113,7 @@ class SpandaConfig:
     
     @property
     def api_base_url(self) -> str:
-        return self.get('api.base_url', 'http://localhost:8000')
+        return self.get('api.base_url', 'http://localhost:8001')
     
     @property
     def api_timeout(self) -> int:

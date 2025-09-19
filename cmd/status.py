@@ -33,16 +33,17 @@ from pkg.module_detector import detect_running_modules, validate_module_health
 
 console = Console()
 
-@click.group()
-def status_group():
-    """Get status of tenant environments and modules"""
-    pass
-
-@status_group.command()
+@click.group(invoke_without_command=True)
 @click.option('--env', '-e', default=None, help='Environment (dev, staging, prod)')
 @click.option('--all-envs', '-a', is_flag=True, help='Show status for all environments')
 @click.pass_context
-def status(ctx, env, all_envs):
+def status_group(ctx, env, all_envs):
+    """Get status of tenant environments and modules"""
+    if ctx.invoked_subcommand is None:
+        # If no subcommand is provided, run the main status functionality
+        show_status(ctx, env, all_envs)
+
+def show_status(ctx, env, all_envs):
     """Show status of all modules in an environment"""
     config = ctx.obj['config']
     api_client = ctx.obj['api_client']
@@ -73,10 +74,26 @@ def status(ctx, env, all_envs):
                 # Try API first, fallback to direct cluster detection
                 try:
                     status_data = api_client.get_tenant_status(tenant_name, environment)
-                    modules = status_data.get('modules', {})
-                except Exception:
+                    
+                    # Extract modules from the API response format
+                    modules = {}
+                    for env_data in status_data.get('environments', []):
+                        if env_data.get('environment') == environment:
+                            env_modules = env_data.get('modules', [])
+                            for module in env_modules:
+                                module_name = module.get('name')
+                                if module_name:
+                                    modules[module_name] = {
+                                        'status': module.get('status', 'unknown'),
+                                        'namespace': env_data.get('namespace', tenant_namespace),
+                                        'replicas': f"{module.get('ready_replicas', 0)}/{module.get('replicas', 0)}",
+                                        'endpoint': 'N/A'  # Will be populated later if needed
+                                    }
+                            break
+                            
+                except Exception as e:
                     # Fallback to direct cluster detection
-                    console.print("[dim]API unavailable, scanning cluster directly...[/dim]")
+                    console.print(f"[dim]API unavailable ({e}), scanning cluster directly...[/dim]")
                     detected_modules = detect_running_modules(tenant_namespace)
                     modules = {}
                     for module_name, module_info in detected_modules.items():

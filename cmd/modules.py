@@ -94,13 +94,13 @@ def list_modules(ctx):
         ) as progress:
             progress.add_task("Fetching available modules...", total=None)
             
-            # Get module_definitions from context (API-driven)
-            module_definitions = ctx.obj.get('module_definitions')
-            if not module_definitions:
-                console.print("[red]Error: Module definitions not available. Check API connection.[/red]")
+            # Get API client from context
+            api_client = ctx.obj.get('api_client')
+            if not api_client:
+                console.print("[red]Error: API client not available. Check configuration.[/red]")
                 return
                 
-            modules = module_definitions.list_modules_by_category()
+            modules = api_client.list_modules()
         
         if not modules:
             console.print("📭 [yellow]No modules available[/yellow]")
